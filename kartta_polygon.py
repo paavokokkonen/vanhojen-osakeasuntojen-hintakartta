@@ -44,13 +44,13 @@ years_json = json.dumps(available_years)
 building_types_json = json.dumps(building_types)
 geojson_json = json.dumps(geojson_data)
 
-# Laske oletustilastot (viimeisin vuosi, kerrostalo yksiöt, hinnat)
+# Laske oletustilastot (viimeisin vuosi, Kaikki-kategoria, hinnat)
 default_prices = []
 for feature in geojson_data['features']:
     if latest_year in feature['properties'].get('data', {}):
-        if '1' in feature['properties']['data'][latest_year]:
-            if 'keskihinta_aritm_nw' in feature['properties']['data'][latest_year]['1']:
-                default_prices.append(feature['properties']['data'][latest_year]['1']['keskihinta_aritm_nw'])
+        if '0' in feature['properties']['data'][latest_year]:
+            if 'keskihinta_aritm_nw' in feature['properties']['data'][latest_year]['0']:
+                default_prices.append(feature['properties']['data'][latest_year]['0']['keskihinta_aritm_nw'])
 
 avg_price = int(sum(default_prices) / len(default_prices)) if default_prices else 0
 max_price = int(max(default_prices)) if default_prices else 0
@@ -191,10 +191,11 @@ html = f'''<!DOCTYPE html>
         <div class="control-group">
             <label for="building-type-select">Huoneistotyyppi:</label>
             <select id="building-type-select" onchange="updateMap()">
+                <option value="0" selected>Kaikki</option>
                 <option value="1">Kerrostalo yksiöt</option>
                 <option value="2">Kerrostalo kaksiot</option>
                 <option value="3">Kerrostalo kolmiot+</option>
-                <option value="5" selected>Rivitalot yhteensä</option>
+                <option value="5">Rivitalot</option>
             </select>
         </div>
         
@@ -374,16 +375,23 @@ html = f'''<!DOCTYPE html>
                     var props = feature.properties;
                     var value = getValue(feature, selectedYear, buildingType, metric);
                     
+                    var popupContent;
                     if (value) {{
                         var metricLabel = isPrice ? 'EUR/m²' : 'kpl';
-                        var popupContent = '<div class="popup-content">' +
+                        popupContent = '<div class="popup-content">' +
                             '<h3>' + props.postinumer + '</h3>' +
                             '<div class="price">' + value.toLocaleString() + ' ' + metricLabel + '</div>' +
                             '<div class="details">' + props.name + '</div>' +
                             '<div class="details">' + selectedYear + ' | ' + buildingTypes[buildingType] + '</div>' +
                             '</div>';
-                        layer.bindPopup(popupContent);
+                    }} else {{
+                        popupContent = '<div class="popup-content">' +
+                            '<h3>' + props.postinumer + '</h3>' +
+                            '<div class="details">' + props.name + '</div>' +
+                            '<div class="details" style="color: #999; font-style: italic;">Ei kauppoja (' + selectedYear + ' | ' + buildingTypes[buildingType] + ')</div>' +
+                            '</div>';
                     }}
+                    layer.bindPopup(popupContent);
                     
                     layer.on('mouseover', function(e) {{
                         this.setStyle({{ fillOpacity: 0.9, weight: 2 }});
@@ -433,6 +441,7 @@ html = f'''<!DOCTYPE html>
                     var valueFrom = getValue(feature, yearFrom, buildingType, metric);
                     var valueTo = getValue(feature, yearTo, buildingType, metric);
                     
+                    var popupContent;
                     if (valueFrom && valueTo && valueFrom > 0) {{
                         var change = ((valueTo - valueFrom) / valueFrom) * 100;
                         var absChange = valueTo - valueFrom;
@@ -440,7 +449,7 @@ html = f'''<!DOCTYPE html>
                         var isPrice = (metric === 'keskihinta_aritm_nw');
                         var metricLabel = isPrice ? 'EUR/m²' : 'kpl';
                         
-                        var popupContent = '<div class="popup-content">' +
+                        popupContent = '<div class="popup-content">' +
                             '<h3>' + props.postinumer + '</h3>' +
                             '<div class="price">' + changeSign + change.toFixed(1) + ' %</div>' +
                             '<div class="details">' + props.name + '</div>' +
@@ -449,8 +458,15 @@ html = f'''<!DOCTYPE html>
                             'Muutos: ' + changeSign + absChange.toLocaleString() + ' ' + metricLabel + '</div>' +
                             '<div class="details">' + buildingTypes[buildingType] + '</div>' +
                             '</div>';
-                        layer.bindPopup(popupContent);
+                    }} else {{
+                        popupContent = '<div class="popup-content">' +
+                            '<h3>' + props.postinumer + '</h3>' +
+                            '<div class="details">' + props.name + '</div>' +
+                            '<div class="details" style="color: #999; font-style: italic;">Ei riittävästi dataa muutoksen laskemiseen<br>' +
+                            '(' + yearFrom + ' - ' + yearTo + ' | ' + buildingTypes[buildingType] + ')</div>' +
+                            '</div>';
                     }}
+                    layer.bindPopup(popupContent);
                     
                     layer.on('mouseover', function(e) {{
                         this.setStyle({{ fillOpacity: 0.9, weight: 2 }});

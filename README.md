@@ -13,10 +13,11 @@ Interaktiivinen kartta Suomen asuntojen keskihinnoista ja kauppamääristä post
 ### 📊 Datasisältö
 - **18 vuotta historiallista dataa** (2009-2025) + ennuste vuodelle 2026*
 - **Huoneistotyypit:**
+  - Kaikki (painotettu keskiarvo, painotettuna kauppojen lukumäärällä)
   - Kerrostalo yksiöt
   - Kerrostalo kaksiot
   - Kerrostalo kolmiot+
-  - Rivitalot yhteensä
+  - Rivitalot
 - **Kaksi mittaria:**
   - Neliöhinnat (EUR/m²)
   - Kauppojen lukumäärä (kpl)
@@ -31,14 +32,19 @@ Interaktiivinen kartta Suomen asuntojen keskihinnoista ja kauppamääristä post
   - Hinnoissa: vihreä = halpa, punainen = kallis
   - Kauppojen määrissä: vihreä = paljon kauppoja, punainen = vähän
   - Muutos-%:ssä: vihreä = positiivinen kasvu, punainen = negatiivinen lasku
+- **Informatiiviset popup-ikkunat:**
+  - Kaikilla alueilla näkyy postinumero ja nimi
+  - Alueilla joilla on kauppoja: hinnat ja määrät
+  - Alueilla ilman kauppoja: "Ei kauppoja" -ilmoitus
 - **Hakutoiminto** postinumeroalueille
 - **Kaupunkinavigointi** (Helsinki, Espoo, Vantaa, Tampere, Turku, Oulu)
 - **Dynaamiset tilastot** valituista parametreista
 
 ### 🔮 Ennusteet
-- **Automaattinen trendianalyysi** viimeisen 5 vuoden datasta
+- **Automaattinen trendianalyysi** viimeisen 5 vuoden datasta (2021-2025)
 - **Lineaarinen ennuste** vuodelle 2026 sekä hinnoille että kauppamäärille
 - **3558 ennustetta** eri postinumeroalueille ja huoneistotyypeille
+  - 785 postinumeroalueella "Kaikki"-kategorian ennuste (painotettu keskiarvo)
 - **Visuaalinen erottelu** tähdellä (*) ennustevuodesta
 
 ## Asennus
@@ -104,10 +110,10 @@ Avaa `kartta.html` selaimessa.
 - **Ennustemenetelmä:** Lineaarinen trendi viimeisen 5 vuoden (2021-2025) datasta
 - **Datamäärä:** 
   - 18 vuotta (17 todellista + 1 ennuste)
-  - 4 huoneistotyyppiä
+  - 5 huoneistotyyppiä (1 painotettu keskiarvo + 4 yksittäistä tyyppiä)
   - 2 mittaria (hinta, kauppamäärä)
   - 1723 postinumeroaluetta
-  - ≈ 123,000 datapistettä
+  - ≈ 155,000 datapistettä (≈90 per alue per huoneistotyyppi)
   - ≈ 414,000 koordinaattipistettä geometrioissa
 
 ### GitHub Actions deployment

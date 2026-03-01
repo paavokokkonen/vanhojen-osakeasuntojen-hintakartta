@@ -22,10 +22,11 @@ TABLE = "ashi/statfin_ashi_pxt_13mu.px"
 
 # Talotyypit
 BUILDING_TYPES = {
+    "0": "Kaikki",
     "1": "Kerrostalo yksiöt",
     "2": "Kerrostalo kaksiot", 
     "3": "Kerrostalo kolmiot+",
-    "5": "Rivitalot yhteensä"
+    "5": "Rivitalot"
 }
 
 
@@ -70,7 +71,8 @@ def fetch_prices(postcodes=None, years=None):
             "query": [
                 {"code": "Vuosi", "selection": {"filter": "item", "values": years}},
                 {"code": "Postinumero", "selection": {"filter": "item", "values": batch}},
-                {"code": "Talotyyppi", "selection": {"filter": "item", "values": list(BUILDING_TYPES.keys())}},
+                # "0" (Kaikki) lasketaan erikseen, ei haeta API:sta
+                {"code": "Talotyyppi", "selection": {"filter": "item", "values": [k for k in BUILDING_TYPES.keys() if k != "0"]}},
                 {"code": "Tiedot", "selection": {"filter": "item", "values": ["keskihinta_aritm_nw", "lkm_julk20"]}}
             ],
             "response": {"format": "json"}
@@ -148,6 +150,45 @@ def analyze_results(results, meta):
         }
     
     return output
+
+def add_weighted_average_category(data):
+    """
+    Lisää 'Kaikki' -kategoria (building_type='0') joka on painotettu keskiarvo
+    kaikista huoneistotyypeistä, painotettuna kauppojen lukumäärällä.
+    """
+    print("\nLasketaan painotetut keskiarvot 'Kaikki'-kategorialle...")
+    
+    added_count = 0
+    
+    for postcode, info in data.items():
+        for year, year_data in info['data'].items():
+            # Laske painotettu keskiarvo tälle vuodelle
+            total_weighted_price = 0
+            total_count = 0
+            
+            # Käy läpi kaikki huoneistotyypit paitsi "0" (Kaikki)
+            for building_type, metrics in year_data.items():
+                if building_type == '0':  # Skipata "Kaikki" jos se on jo olemassa
+                    continue
+                
+                price = metrics.get('keskihinta_aritm_nw')
+                count = metrics.get('lkm_julk20')
+                
+                # Vain jos molemmat arvot on olemassa ja count > 0
+                if price is not None and count is not None and count > 0:
+                    total_weighted_price += price * count
+                    total_count += count
+            
+            # Jos on dataa, lisää "Kaikki"-kategoria
+            if total_count > 0:
+                year_data['0'] = {
+                    'keskihinta_aritm_nw': round(total_weighted_price / total_count, 2),
+                    'lkm_julk20': total_count
+                }
+                added_count += 1
+    
+    print(f"   Lisätty {added_count} 'Kaikki'-kategoriaa eri vuosille ja alueille")
+    return data
 
 def calculate_forecast(data, available_years, forecast_year='2026'):
     """
@@ -305,8 +346,14 @@ def main():
     # Analysoi
     data = analyze_results(results, meta)
     
-    # Laske ennuste vuodelle 2026
+    # Lisää painotettu keskiarvo "Kaikki"-kategorialle (historiadatalle)
+    data = add_weighted_average_category(data)
+    
+    # Laske ennuste vuodelle 2026 muille huoneistotyypeille
     data = calculate_forecast(data, available_years, forecast_year='2026')
+    
+    # Lisää painotettu keskiarvo "Kaikki"-kategorialle myös ennustevuodelle
+    data = add_weighted_average_category(data)
     
     # Lisää ennustevuosi saatavillaoleviin vuosiin
     forecast_years = available_years + ['2026']
