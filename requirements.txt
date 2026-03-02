@@ -1,7 +1,17 @@
 # Python-riippuvuudet asuntojen hintakartta -projektille
 
-# HTTP-pyynnöt (Tilastokeskus API, Paituli WFS)
+# HTTP-pyynnöt (Tilastokeskus API, Paituli WFS, OpenStreetMap)
 requests>=2.31.0
+
+# Korrelaatioanalyysi ja tilastolliset testit
+scipy>=1.11.0
+pandas>=2.0.0
+
+# Geometrinen käsittely (etäisyyslaskelmat)
+shapely>=2.0.0
+
+# Aikasarja-ennusteet (ARIMA, Exponential Smoothing)
+statsmodels>=0.14.0
 
 # JSON-datan käsittely on sisäänrakennettu Pythonissa
 # Ei vaadi erillistä pakettia
