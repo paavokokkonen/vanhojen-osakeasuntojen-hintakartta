@@ -15,12 +15,19 @@ import json
 import numpy as np
 from scipy import stats
 import warnings
+
+# Hiljennä kaikki varoitukset (myös statsmodels convergence warnings)
 warnings.filterwarnings('ignore')
+warnings.simplefilter('ignore')
 
 # Yritä tuoda statsmodels, mutta jatka ilman sitä jos ei ole asennettuna
 try:
     from statsmodels.tsa.holtwinters import SimpleExpSmoothing
     from statsmodels.tsa.arima.model import ARIMA
+    # Hiljennä statsmodels-spesifiset varoitukset
+    import statsmodels.api as sm
+    sm.tools.sm_exceptions.ConvergenceWarning.__module__ = 'warnings'
+    warnings.filterwarnings('ignore', category=sm.tools.sm_exceptions.ConvergenceWarning)
     HAS_STATSMODELS = True
 except ImportError:
     print("⚠️  statsmodels ei ole asennettu. Käytetään vain lineaarista mallia.")
@@ -49,7 +56,8 @@ def calculate_arima_forecast(years, values):
     try:
         # ARIMA(1,1,1) - yksinkertainen malli joka toimii useimmilla aikasarjoilla
         model = ARIMA(values, order=(1, 1, 1))
-        fitted_model = model.fit()
+        # Suppress warnings ja rajoita iteraatiot
+        fitted_model = model.fit(method_kwargs={'maxiter': 200, 'disp': False})
         forecast = fitted_model.forecast(steps=1)[0]
         return max(0, float(forecast))
     except:
