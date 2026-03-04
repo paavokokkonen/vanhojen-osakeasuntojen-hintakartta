@@ -188,42 +188,39 @@ def lataa_osm_tiedosto(tiedostonimi='finland-latest.osm.pbf'):
     
     print(f"   Ladataan OSM-tiedosto Geofabrikista...")
     print(f"   URL: https://download.geofabrik.de/europe/finland-latest.osm.pbf")
-    print(f"   Tämä kestää useita minuutteja (~230 MB)...")
+    print(f"   Tämä kestää useita minuutteja (~676 MB)...")
     
     url = 'https://download.geofabrik.de/europe/finland-latest.osm.pbf'
     
     try:
-        # Ohita SSL-varmistus Windows-ympäristössä
-        import ssl
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
+        # Käytä requests-kirjastoa streamingia varten
+        response = requests.get(url, stream=True, timeout=600, headers={'User-Agent': 'Mozilla/5.0'})
+        response.raise_for_status()
         
-        import urllib.request
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        total_size = int(response.headers.get('Content-Length', 0))
+        downloaded = 0
         
-        with urllib.request.urlopen(req, context=ssl_context, timeout=300) as response:
-            total_size = int(response.headers.get('Content-Length', 0))
-            downloaded = 0
-            
-            with open(tiedostonimi, 'wb') as f:
-                while True:
-                    chunk = response.read(8192)
-                    if not chunk:
-                        break
+        print(f"   Tiedoston koko: {total_size/(1024*1024):.1f} MB")
+        
+        with open(tiedostonimi, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
                     f.write(chunk)
                     downloaded += len(chunk)
-                    if total_size > 0:
+                    if total_size > 0 and downloaded % (10 * 1024 * 1024) == 0:  # Printtaa joka 10 MB
                         progress = (downloaded / total_size) * 100
-                        print(f"\r   Ladattu: {progress:.1f}% ({downloaded/(1024*1024):.1f} MB / {total_size/(1024*1024):.1f} MB)", end='')
+                        print(f"   Ladattu: {progress:.1f}% ({downloaded/(1024*1024):.1f} MB)")
         
-        print(f"\n   ✅ Lataus valmis: {tiedostonimi}")
+        final_size = os.path.getsize(tiedostonimi) / (1024 * 1024)
+        print(f"   ✅ Lataus valmis: {tiedostonimi} ({final_size:.1f} MB)")
         return tiedostonimi
         
     except Exception as e:
-        print(f"\n   ❌ Lataus epäonnistui: {e}")
+        print(f"   ❌ Lataus epäonnistui: {e}")
         print(f"   Voit ladata tiedoston manuaalisesti:")
         print(f"   https://download.geofabrik.de/europe/finland-latest.osm.pbf")
+        if os.path.exists(tiedostonimi):
+            os.remove(tiedostonimi)  # Poista osittain ladattu tiedosto
         return None
 
 
@@ -435,18 +432,27 @@ def main():
     palvelut = {}
     if OSMIUM_AVAILABLE and postinumero_geometriat:
         print("\nPalvelutietojen haku OSM-datasta...")
+        print(f"   OSMIUM_AVAILABLE: {OSMIUM_AVAILABLE}")
+        print(f"   Geometrioita ladattu: {len(postinumero_geometriat)}")
+        
         osm_tiedosto = lataa_osm_tiedosto('finland-latest.osm.pbf')
         
         if osm_tiedosto:
+            print(f"   ✅ OSM-tiedosto valmis: {osm_tiedosto}")
             palvelut = hae_palvelut_osm_geofabrik(
                 postinumero_geometriat, 
                 osm_tiedosto=osm_tiedosto
             )
+        else:
+            print(f"   ❌ OSM-tiedoston lataus epäonnistui!")
+            print(f"   ⚠️  Jatketaan ilman palvelutietoja")
     else:
         if not OSMIUM_AVAILABLE:
             print("\n⚠️  Palvelutietojen haku ohitettu (osmium ei asennettu)")
+            print(f"   Yritä: pip install osmium")
         elif not postinumero_geometriat:
             print("\n⚠️  Palvelutietojen haku ohitettu (geometriat puuttuvat)")
+            print(f"   Geometrioita: {len(postinumero_geometriat) if postinumero_geometriat else 0}")
     
     # 6. Yhdistä kaikki data
     rikastettu_data = {}
@@ -473,6 +479,10 @@ def main():
     if palvelut:
         alueet_palveluilla = sum(1 for p in palvelut.values() if p.get('palveluindeksi', 0) > 0)
         print(f"   - Palvelut: {len(palvelut)} ({alueet_palveluilla} alueella dataa)")
+        print(f"   ✅ PALVELUTIEDOT MUKANA")
+    else:
+        print(f"   - Palvelut: 0 (ei dataa)")
+        print(f"   ⚠️  PALVELUTIEDOT PUUTTUVAT - kartta ilman palveluita!")
     print("="*60)
 
 
