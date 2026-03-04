@@ -40,8 +40,17 @@ jobs:
     - name: Hae asuntohintadata
       run: python asuntohinnat.py
     
-    - name: Hae postinumeroalueet Paitulista
+    - name: Hae postinumeroalueet
       run: python lataa_postinumeroalueet.py
+    
+    - name: Hae väestötiedot ja palvelutiedot
+      run: python rikasta_data.py
+    
+    - name: Laske trendianalyysi
+      run: python laske_trendianalyysi.py
+    
+    - name: Laske ennusteet
+      run: python laske_ennusteet.py
     
     - name: Luo interaktiivinen kartta
       run: python kartta_polygon.py
