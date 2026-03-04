@@ -87,6 +87,10 @@ for feature in geojson_data['features']:
         else:
             feature['properties']['paavo'] = None
             feature['properties']['paavo_aikasarja'] = {}
+        
+        # Lisää palvelutiedot jos saatavilla
+        palvelut = rikastettu_data[postcode].get('palvelut', {})
+        feature['properties']['palvelut'] = palvelut if palvelut else {}
 
 # Luo JavaScript-muuttujat
 years_json = json.dumps(available_years)
@@ -714,6 +718,22 @@ html = f'''<!DOCTYPE html>
                             }}
                         }}
                         
+                        // Lisää palvelutiedot jos saatavilla
+                        if (props.palvelut && Object.keys(props.palvelut).length > 0) {{
+                            var palvelut = props.palvelut;
+                            if (palvelut.kaupat !== undefined && palvelut.palveluindeksi > 0) {{
+                                popupContent += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
+                                    '<strong>🏪 Palvelut (postinumeroalueella):</strong><br>' +
+                                    '🛒 Kaupat: ' + palvelut.kaupat + '<br>' +
+                                    '🏫 Koulut: ' + palvelut.koulut + '<br>' +
+                                    '🧒 Päiväkodit: ' + palvelut.paivakodit + '<br>' +
+                                    '💪 Liikuntapaikat: ' + palvelut.liikuntapaikat + '<br>' +
+                                    '🏥 Terveysasemat: ' + palvelut.terveysasemat + '<br>' +
+                                    '🚌 Julk. liikenne: ' + palvelut.julkinen_liikenne + '<br>' +
+                                    '⭐ Palveluindeksi: ' + palvelut.palveluindeksi.toFixed(1) + '</div>';
+                            }}
+                        }}
+                        
                         popupContent += '</div>';
                     }} else {{
                         popupContent = '<div class="popup-content">' +
@@ -755,6 +775,22 @@ html = f'''<!DOCTYPE html>
                                         'Työttömyys: ' + paavo.tyottomyysaste.toFixed(1) + ' %<br>' +
                                         'Väestötiheys: ' + paavo.vaestotiheys.toFixed(0) + ' as/km²</div>';
                                 }}
+                            }}
+                        }}
+                        
+                        // Lisää palvelutiedot myös kun ei kauppoja
+                        if (props.palvelut && Object.keys(props.palvelut).length > 0) {{
+                            var palvelut = props.palvelut;
+                            if (palvelut.kaupat !== undefined && palvelut.palveluindeksi > 0) {{
+                                popupContent += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
+                                    '<strong>🏪 Palvelut (postinumeroalueella):</strong><br>' +
+                                    '🛒 Kaupat: ' + palvelut.kaupat + '<br>' +
+                                    '🏫 Koulut: ' + palvelut.koulut + '<br>' +
+                                    '🧒 Päiväkodit: ' + palvelut.paivakodit + '<br>' +
+                                    '💪 Liikuntapaikat: ' + palvelut.liikuntapaikat + '<br>' +
+                                    '🏥 Terveysasemat: ' + palvelut.terveysasemat + '<br>' +
+                                    '🚌 Julk. liikenne: ' + palvelut.julkinen_liikenne + '<br>' +
+                                    '⭐ Palveluindeksi: ' + palvelut.palveluindeksi.toFixed(1) + '</div>';
                             }}
                         }}
                         
@@ -945,6 +981,22 @@ html = f'''<!DOCTYPE html>
                                     'Keski-ikä: ' + ikaSign + ikaMuutos.toFixed(1) + ' v<br>' +
                                     'Keskitulo: ' + tuloSign + tuloMuutos.toFixed(1) + ' %<br>' +
                                     'Työttömyys: ' + tyottomyysSign + tyottomyysMuutos.toFixed(1) + ' %-yks</div>';
+                            }}
+                        }}
+                        
+                        // Lisää palvelutiedot jos saatavilla
+                        if (props.palvelut && Object.keys(props.palvelut).length > 0) {{
+                            var palvelut = props.palvelut;
+                            if (palvelut.kaupat !== undefined && palvelut.palveluindeksi > 0) {{
+                                popupContent += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
+                                    '<strong>🏪 Palvelut (postinumeroalueella):</strong><br>' +
+                                    '🛒 Kaupat: ' + palvelut.kaupat + '<br>' +
+                                    '🏫 Koulut: ' + palvelut.koulut + '<br>' +
+                                    '🧒 Päiväkodit: ' + palvelut.paivakodit + '<br>' +
+                                    '💪 Liikuntapaikat: ' + palvelut.liikuntapaikat + '<br>' +
+                                    '🏥 Terveysasemat: ' + palvelut.terveysasemat + '<br>' +
+                                    '🚌 Julk. liikenne: ' + palvelut.julkinen_liikenne + '<br>' +
+                                    '⭐ Palveluindeksi: ' + palvelut.palveluindeksi.toFixed(1) + '</div>';
                             }}
                         }}
                         

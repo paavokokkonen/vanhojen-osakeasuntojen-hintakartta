@@ -26,8 +26,10 @@ testi_*.html
 tarkista_*.py
 *.bak
 *.backup
-output.txt
+output.txttemp_output.txt
 
+# OSM-datatiedostot (isot, ladataan ajossa)
+*.osm.pbf
 # Build/deployment kansiot
 public/
 dist/

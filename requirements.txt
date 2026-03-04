@@ -13,5 +13,8 @@ shapely>=2.0.0
 # Aikasarja-ennusteet (ARIMA, Exponential Smoothing)
 statsmodels>=0.14.0
 
+# OSM-datan parsiminen (Geofabrik .osm.pbf tiedostot)
+osmium>=3.6.0
+
 # JSON-datan käsittely on sisäänrakennettu Pythonissa
 # Ei vaadi erillistä pakettia

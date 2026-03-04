@@ -40,8 +40,8 @@ Interaktiivinen kartta Suomen asuntojen keskihinnoista ja kauppamääristä post
   - Kaikilla alueilla näkyy postinumero ja nimi
   - Alueilla joilla on kauppoja: hinnat ja määrät
   - Alueilla ilman kauppoja: "Ei kauppoja" -ilmoitus
-  - Absoluuttisessa näkymässä: väestötiedot (väkiluku, keski-ikä, keskitulo, työttömyysaste)
-  - Analyysissa: 5 vuoden muutokset hinnoissa ja väestötiedoissa
+  - Absoluuttisessa näkymässä: väestötiedot (väkiluku, keski-ikä, keskitulo, työttömyysaste) + palvelutiedot
+  - Analyysissa: 5 vuoden muutokset hinnoissa ja väestötiedoissa + palvelutiedot
 - **Hakutoiminto** postinumeroalueille
 - **Kaupunkinavigointi** (Helsinki, Espoo, Vantaa, Tampere, Turku, Oulu, Kuopio)
 - **Dynaamiset tilastot** valituista parametreista
@@ -70,6 +70,20 @@ Interaktiivinen kartta Suomen asuntojen keskihinnoista ja kauppamääristä post
   - Markkinaaktiivisuus (keskimääräinen kauppamäärä)
   - Volatiliteetti (hintojen vaihtelu)
   - Väestömuutokset (väkiluku, ikä, tulot, työttömyys)
+
+### 🏪 Palvelutiedot (OpenStreetMap)
+- **Datalähde:** Geofabrik finland-latest.osm.pbf (~676 MB, päivittyy päivittäin)
+- **Laskentamenetelmä:** Point-in-polygon tarkistus postinumeroalueen tarkoilla rajoilla
+- **Palvelukategoriat:** (6 kpl)
+  - 🛒 Kaupat (shop=supermarket, shop=convenience, shop=mall)
+  - 🏫 Koulut (amenity=school)
+  - 🧒 Päiväkodit (amenity=kindergarten)
+  - 💪 Liikuntapaikat (leisure=sports_centre, leisure=fitness_centre, leisure=stadium, leisure=pitch)
+  - 🏥 Terveysasemat (amenity=clinic, amenity=doctors, amenity=hospital)
+  - 🚌 Julkinen liikenne (railway=*, public_transport=stop_position)
+- **Palveluindeksi:** Painotettu keskiarvo (kaupat 30%, julkinen liikenne 25%, koulut 15%, päiväkodit 15%, liikuntapaikat 10%, terveysasemat 5%)
+- **Kattavuus:** 1134/1723 postinumeroalueella palvelutietoja (66%)
+- **Huom:** Palvelut ovat snapshot nykyhetkestä, ei aikasarjaa
 
 ### 🔮 Ennusteet ja mallit
 - **Oletuksena viimeisin datavuosi (2025)** - Kartta aukeaa vuoteen 2025, joka on viimeisin Tilastokeskuksen julkaisema datavuosi
@@ -111,7 +125,7 @@ python asuntohinnat.py
 # 2. Lataa postinumeroalueet Tilastokeskuksen WFS-rajapinnasta
 python lataa_postinumeroalueet.py
 
-# 3. Hae väestötiedot Paavo-tietokannasta (2015-2026)
+# 3. Hae väestötiedot Paavo-tietokannasta (2015-2026) ja palvelutiedot OSM-datasta
 python rikasta_data.py
 
 # 4. Laske 5 vuoden trendianalyysi
@@ -126,14 +140,19 @@ python kartta_polygon.py
 
 Avaa `kartta.html` selaimessa.
 
-**Huom:** Vaiheet 1-5 hakevat dataa verkosta tai laskevat ennusteita. Asuntohinnat.py, rikasta_data.py ja laske_ennusteet.py kestävät ~1-3 min. Kartta generoidaan nopeasti vaiheessa 6.
+**Huom:** 
+- Vaiheet 1-5 hakevat dataa verkosta tai laskevat ennusteita
+- `asuntohinnat.py` kestää ~1-2 min (StatFin API)
+- `rikasta_data.py` kestää ~5-10 min (Paavo WFS API + OSM-datan lataus ~676 MB + parsing 1.7M nodea)
+- `laske_ennusteet.py` kestää ~2-3 min (ARIMA ja Exponential Smoothing mallit)
+- `kartta_polygon.py` generoi kartan nopeasti (~10-30 s)
 
 ## Tiedostot
 
 ### Dataskriptit
 - `asuntohinnat.py` - Hakee asuntohintadatan Tilastokeskuksesta (2009-2025) ja laskee lineaarisen ennusteen (2026)
 - `lataa_postinumeroalueet.py` - Hakee postinumeroalueiden tarkat geometriat Tilastokeskuksen WFS-rajapinnasta
-- `rikasta_data.py` - Hakee Paavo-väestötiedot aikasarjana (2015-2026) Tilastokeskuksen WFS-rajapinnasta
+- `rikasta_data.py` - Hakee Paavo-väestötiedot aikasarjana (2015-2026) ja palvelutiedot OSM-datasta (Geofabrik)
 - `laske_trendianalyysi.py` - Laskee 5 vuoden trendit, volatiliteetin ja markkinaaktiivisuuden
 - `laske_ennusteet.py` - Laskee edistyneet ennustemallit (ARIMA, Exponential Smoothing) vuodelle 2026
 - `kartta_polygon.py` - Luo interaktiivisen kartan
@@ -142,10 +161,11 @@ Avaa `kartta.html` selaimessa.
 - `data/asuntohinnat.json` - Asuntohintadata vuosittain (2009-2026), huoneistotyypeittäin (~7.9 MB)
 - `data/postinumerot_hinnat.geojson` - Postinumeroalueiden tarkat geometriat + hinnat (~16.6 MB)
 - `data/postinumerokoordinaatit.json` - Alueiden keskipisteet
-- `data/rikastettu_data.json` - Väestötiedot aikasarjana (2015-2026, 3044 aluetta) (~1.2 MB)
+- `data/rikastettu_data.json` - Väestötiedot aikasarjana (2015-2026, 3044 aluetta) + palvelutiedot (~1.2 MB)
 - `data/trendianalyysi.json` - 5 vuoden trendianalyysi (867 aluetta) (~217 KB)
 - `data/ennusteet_mallit.json` - Ennusteet kolmella mallilla (Linear, ARIMA, Exponential) (~600 KB)
 - `data/korrelaatiot.json` - Placeholder korrelaatioanalyysia varten
+- `finland-latest.osm.pbf` - OpenStreetMap data Suomesta (~676 MB, ladataan rikasta_data.py:llä)
 
 ### Kartat (generoituvat)
 - `kartta.html` - Interaktiivinen polygon-kartta (~20+ MB)
@@ -157,6 +177,7 @@ Avaa `kartta.html` selaimessa.
   - Asuntohinnat: Tilastokeskus StatFin API (ashi_13mu)
   - Geometriat: Tilastokeskus WFS API (postialue:pno_tilasto)
   - Väestötiedot: Tilastokeskus WFS API (postialue:pno_tilasto_XXXX, vuodet 2015-2026)
+  - Palvelutiedot: OpenStreetMap via Geofabrik (finland-latest.osm.pbf)
 - **Geometriatarkkuus:**
   - 8 desimaalin koordinaattitarkkuus (WFS: `coordinate_precision:8`)
   - Ei geometrian yksinkertaistusta (WFS: `decimation:NONE`, Leaflet: `smoothFactor:0`)
@@ -172,6 +193,12 @@ Avaa `kartta.html` selaimessa.
 - **Väestödata:** 
   - Aikasarja 2015-2026 (12 vuotta × 3044 postinumeroaluetta ≈ 36,500 tietuetta)
   - Huom: Paavo-data julkaistaan +1 vuoden viiveellä (pno_tilasto_2025 sisältää 31.12.2024 tilanteen)
+- **Palveludata:**
+  - OSM-data parsed osmium-kirjastolla (1.7M+ nodea)
+  - Point-in-polygon tarkistus shapely-kirjastolla
+  - 6 palvelukategoriaa, painotettu palveluindeksi
+  - 1134/1723 alueella palvelutietoja (66%)
+  - Snapshot nykyhetkestä (ei aikasarjaa)
 - **Datamäärä:** 
   - 18 vuotta (17 todellista + 1 ennuste)
   - 5 huoneistotyyppiä (1 painotettu keskiarvo + 4 yksittäistä tyyppiä)
@@ -179,6 +206,7 @@ Avaa `kartta.html` selaimessa.
   - 1723 postinumeroaluetta
   - ≈ 155,000 datapistettä asuntohinnoissa
   - ≈ 36,500 datapistettä väestötiedoissa
+  - ≈ 10,000 datapistettä palvelutiedoissa (6 kategoriaa × 1134 aluetta + palveluindeksit)
   - ≈ 414,000 koordinaattipistettä geometrioissa
 
 ### GitHub Actions deployment
@@ -189,6 +217,8 @@ Kartta päivittyy automaattisesti ilman manuaalista työtä:
 2. **Datan haku:** 
    - Tilastokeskuksen StatFin API → Asuntohinnat (2009-2025)
    - Tilastokeskuksen WFS API → Tarkat postinumeroalueiden geometriat
+   - Tilastokeskuksen WFS API → Väestötiedot (Paavo 2015-2026)
+   - Geofabrik → OSM-data (~676 MB) → Palvelutiedot (osmium-parsing)
 3. **Ennusteet:** Lineaarinen trendianalyysi → 2026 ennusteet
 4. **Kartan generointi:** Python-skriptit luovat kartta.html:n
 5. **Julkaisu:** GitHub Pages palvelee automaattisesti päivitetyn kartan
@@ -249,6 +279,12 @@ Kartta päivittyy automaattisesti ilman manuaalista työtä:
   - *Toteutus:* Laske Pearsonin korrelaatiot hintdatan, väestödatan ja trendien välillä. Visualisoi lämpökarttana (heatmap) Chart.js:llä tai D3.js:llä.
   - *Esimerkki:* "Suurin positiivinen korrelaatio: Keskitulo (0.68). Suurin negatiivinen: Työttömyys (-0.42)."
 
+- **Palveluindeksin vaikutus hintoihin**
+  - *Miksi:* Tutkia korrelaatiota palveluiden määrän ja asuntohintojen välillä. Ovatko hyvin palvellut alueet kalliimpia?
+  - *Toteutus:* Laske Pearsonin korrelaatio palveluindeksin ja neliöhinnan välillä. Scatter plot palveluindeksi vs. hinta. Näytä regressiosuora.
+  - *Hypoteesi:* Alueet, joilla paljon kauppoja ja julkista liikennettä, ovat yleensä kalliimpia.
+  - *Esimerkki:* "Palveluindeksi korreloi +0.52 neliöhintojen kanssa. Jokainen +10 palveluindeksin piste nostaa hintoja keskimäärin ~200 €/m²."
+
 - **Scatter plot -näkymä** (hajontakuvio)
   - *Miksi:* Visualisoi alueita kahdessa ulottuvuudessa, esim. hinta vs. tulot. Käyttäjä voi tunnistaa outlier-alueita (kalliit mutta matala tulotaso).
   - *Toteutus:* Uusi välilehti "Analyysi". Käyttäjä valitsee X- ja Y-akselin (esim. keskihinta, keskitulo, etäisyys keskustaan). Jokainen piste = postinumeroalue. Hover näyttää postinumeron.
@@ -307,7 +343,7 @@ Kartta päivittyy automaattisesti ilman manuaalista työtä:
 **Ideat:**
 
 - **✅ Mobiilioptimeinti** (osittain toteutettu 4.3.2026)
-  - *Miksi:* Yhä useampi käyttäjä selaa karttaa puhelimella. Nykyinen käyttöliittymä on optimoitu desktop-käyttöön.
+  - *Status:* ✅ Toteutettu
   - *Toteutettu:*
     - CSS media queries (@media max-width: 768px) lisätty
     - Pienempi otsikko ja tiiviimmät kontrollit mobiilissa
@@ -315,18 +351,14 @@ Kartta päivittyy automaattisesti ilman manuaalista työtä:
     - Fonttikoot ja välimatkat optimoitu kosketusnäytöille
     - Animaation play/pause ja speed-kontrollit näkyvissä mobiilissakin
   - *Vielä toteutettavana:*
-    - Hamburger-valikko (nykyisin kontrollit piilossa oletuksena mobiilissa)
+    - Hamburger-valikko
     - Swipe-gesturet animaatioille
     - Touch-optimoidut zoom-kontrollit
-  - *Esimerkki:* "Mobiilissa otsikko vie 50px (aiemmin 80px), controls aukeaa alhaalta kun muutoskartta valittu."
 
 - **✅ Animaatioiden alasvetovalikko** (toteutettu 4.3.2026)
-  - *Miksi:* Radio-painikkeet veivät liikaa tilaa, erityisesti mobiilissa
-  - *Toteutettu:* 
-    - Muutettu animaatiotyyppi radio-painikkeista dropdown-valikoksi
-    - Säästää tilaa ja selkeyttää käyttöliittymää
-    - Helpompi käyttää kosketusnäytöllä
-  - *Sijainti:* Animaation play/pause -napin vieressä
+  - *Status:* ✅ Toteutettu
+  - *Muutos:* Radio-painikkeet → dropdown-valikko
+  - *Edut:* Säästää tilaa, helpompi käyttää kosketusnäytöllä
 
 - **Tumma tila** (dark mode)
   - *Miksi:* Vähentää silmien rasitusta hämärässä ja säästää energiaa OLED-näytöillä.
@@ -353,6 +385,11 @@ Kartta päivittyy automaattisesti ilman manuaalista työtä:
   - *Toteutus:* Kaikki tekstit JSON-tiedostossa (`fi.json`, `en.json`). Toggle-nappi "FI | EN". JavaScript lataa oikean kielen. Muuttaa otsikot, labelit, legendat.
   - *Esimerkki:* "EN-versio: 'Housing Price Map', 'Old Condominiums', 'Average price per m²'."
 
+- **Palveluindeksin mukauttaminen**
+  - *Miksi:* Eri käyttäjät arvostavat eri palveluita. Lapsiperheelle päiväkodit tärkeitä, eläkeläiselle kaupat ja terveysasemat.
+  - *Toteutus:* Liukusäätimet (sliders) jokaiselle palvelukategorialle (kaupat, koulut, päiväkodit...). Käyttäjä asettaa painotukset (yhteensä 100%). Palveluindeksi lasketaan uudelleen dynaamisesti. Kartta päivittyy.
+  - *Esimerkki:* "Lapsiperhe: Koulut 40%, Päiväkodit 40%, Kaupat 20%. Eläkeläinen: Kaupat 50%, Terveysasemat 30%, Julkinen liikenne 20%. Kartta näyttää eri alueet korostuneina."
+
 ### 5. Lisädatan integrointi
 
 **Tavoite:** Rikastaa karttaa ulkopuolisilla tietolähteillä, jotka vaikuttavat asuntohintoihin.
@@ -365,17 +402,27 @@ Kartta päivittyy automaattisesti ilman manuaalista työtä:
   - *Esimerkki:* "00100: 0 min. 00710: 18 min julkisilla (metro). 01450: 52 min julkisilla."
   - *Haaste:* Google API on maksullinen (0.005€/haku, 1723 aluetta = 8.6€). HSL API toimii vain PK-seudulla.
 
-- **Palvelut** (etäisyydet kouluihin, kauppoihin)
-  - *Miksi:* Perheet arvostavat lähellä olevia kouluja ja päiväkoteja. Ikääntyneet arvostavat kauppoja.
-  - *Toteutus:* OpenStreetMap Overpass API. Hae kaikki koulut, päiväkodit, kaupat. Laske etäisyys postinumeroalueen keskipisteestä lähimpään palveluun. Turf.js distance-funktio.
-  - *Esimerkki:* "00100: Lähin koulu 320m, lähin kauppa 180m, lähin päiväkoti 410m."
-  - **⚠️ Haasteet (4.3.2026):**
-    - OpenStreetMap Overpass API kärsii vakavista rate limit -ongelmista
-    - Yritettiin hakea palvelutietoja (kaupat, koulut, päiväkodit, liikuntapaikat, terveysasemat, julkinen liikenne) 1 km säteellä postinumeroalueen keskipisteestä
-    - Tulokset: 0/10 onnistunutta hakua - kaikki pyynnöt epäonnistuivat joko `429 Too Many Requests` tai `504 Gateway Timeout` virheisiin
-    - Kokeiltu ratkaisut: pyyntöjen välissä 5-10s odotusajat, batch-koko rajoitettu 10:een, SSL-varmennuksen ohitus (Windows-ympäristö)
-    - Johtopäätös: Julkinen Overpass API ei skaalaudu 1700+ postinumeroalueen datan hakemiseen. Vaatisi joko oman Overpass-palvelimen tai vaihtoehtoisen datalähteen (esim. OSM planet dump + paikallinen tietokanta)
-    - Ominaisuus jätetty toistaiseksi toteuttamatta API:n epäluotettavuuden vuoksi
+- **✅ Palvelutiedot** (kaupat, koulut, päiväkodit, liikuntapaikat, terveysasemat, julkinen liikenne)
+  - *Status:* ✅ Toteutettu (4.3.2026)
+  - *Ratkaisu:* Geofabrik OSM data + paikallinen parsing (osmium-kirjasto)
+  - *Toteutettu:*
+    - Ladataan finland-latest.osm.pbf (~676 MB) Geofabrikista
+    - Parsitaan osmium-kirjastolla (1.7M+ nodea)
+    - Point-in-polygon tarkistus shapely:llä (ei enää 1 km säde, vaan tarkat postinumeroaluerajat)
+    - 6 palvelukategoriaa: kaupat, koulut, päiväkodit, liikuntapaikat, terveysasemat, julkinen liikenne
+    - Painotettu palveluindeksi (kaupat 30%, julkinen liikenne 25%, koulut 15%, päiväkodit 15%, liikuntapaikat 10%, terveysasemat 5%)
+    - Näkyy popup-ikkunoissa emojeilla 🛒🏫🧒💪🏥🚌
+  - *Kattavuus:* 1134/1723 postinumeroalueella (66%)
+  - *Haasteet:* 
+    - Ei aikasarjaa (vain nykyhetken snapshot)
+    - Vanhemmat alueet ja syrjäseudut usein ilman OSM-dataa
+    - OSM-datan laatu vaihtelee alueittain
+  - *Vaihtoehdot historialliseen dataan:*
+    - Geofabrik arkisto (historialliset snapshotit eri vuosilta)
+    - OSM Full History dump (erittäin suuri tiedosto)
+  - **⚠️ Aikaisemmat haasteet Overpass API:n kanssa (ratkaistu):**
+    - Overpass API rate limiting: 0/10 onnistunutta hakua
+    - Ratkaistu vaihtamalla Geofabrik-ratkaisuun (lokaalir parsing)
 
 - **Uudiskohteet** (rakenteilla olevat asunnot)
   - *Miksi:* Isot rakennusprojektit voivat vaikuttaa alueen hintoihin (lisää tarjontaa → hinnat laskevat, tai parantaa alueen imagoa → hinnat nousevat).
@@ -398,10 +445,20 @@ Kartta päivittyy automaattisesti ilman manuaalista työtä:
   - *Toteutus:* HSY (Helsingin seudun ympäristöpalvelut) ilmanlaatu-API. Tulliluodon melumalli (Helsingin kaupunki). Tallenna keskimääräiset PM2.5-pitoisuudet ja dB-tasot postinumeroalueittain.
   - *Esimerkki:* "00100: PM2.5 keskiarvo 6.2 µg/m³ (hyvä). Melutaso 65 dB (kohtalainen, vilkas liikenne). 00570: PM2.5 5.1 µg/m³, 54 dB (hiljainen)."
 
+- **Historiallinen palveludata** (palveluiden kehityksen seuranta)
+  - *Miksi:* Nähdä miten palvelut ovat kehittyneet alueilla ajan myötä. Onko alueelle tullut lisää kauppoja? Onko koulu suljettu?
+  - *Toteutus:* Lataa Geofabrik arkistosta historiallisia OSM-snapshoteja (esim. 2015, 2017, 2019, 2021, 2023, 2025). Parse jokaiselle vuodelle palvelutiedot samalla tavalla. Tallenna aikasarjana.
+  - *Haaste:* ~3-5 GB per snapshot-vuosi. Yhteensä ~20-30 GB dataa 6 vuodelle. Parsing kestää ~30-60 min kaikille vuosille.
+  - *Hyöty:* Palvelutiedot voisi integroida 5v trendianalyysiin. Tutkia korrelaatiota palveluiden lisääntymisen ja hintojen nousun välillä.
+  - *Esimerkki:* "00100: Kauppoja lisääntynyt 18→24 (2015-2025). Metro-asemia +2. Palveluindeksi kasvanut 65→78. Samaan aikana hinnat nousseet +42%."
+
 **Osallistu kehitykseen!** Ehdotuksia ja pull requestejä otetaan vastaan mielellään.
 
 ## Lähdeviitteet
 
 - Asuntohinnat: [Tilastokeskus StatFin](https://stat.fi/) - ashi_13mu
 - Postinumeroalueet: [Tilastokeskus geo.stat.fi](https://geo.stat.fi/) - postialue:pno_tilasto
+- Väestötiedot: [Tilastokeskus Paavo](https://www.stat.fi/tup/paavo/) - postialue:pno_tilasto_XXXX
+- Palvelutiedot: [OpenStreetMap](https://www.openstreetmap.org/) via [Geofabrik](https://download.geofabrik.de/europe/finland.html) - finland-latest.osm.pbf
 - Karttakirjasto: [Leaflet](https://leafletjs.com/)
+- OSM-parsing: [pyosmium](https://osmcode.org/pyosmium/)

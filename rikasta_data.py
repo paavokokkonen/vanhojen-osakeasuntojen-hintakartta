@@ -1,19 +1,29 @@
 #!/usr/bin/env python3
 """
-Rikasta asuntohintadata väestötiedoilla
-=============================================
+Rikasta asuntohintadata väestötiedoilla ja palveluilla
+=======================================================
 Hakee:
 - Paavo-väestötiedot (Tilastokeskus)
 - Etäisyydet keskustoihin
+- Palvelut (OSM Geofabrik data, parsitaan paikallisesti)
 """
 
 import requests
 import json
 import time
+import os
 from xml.etree import ElementTree as ET
 from shapely.geometry import shape, Point
 from shapely.ops import nearest_points
 import math
+
+try:
+    import osmium
+    OSMIUM_AVAILABLE = True
+except ImportError:
+    OSMIUM_AVAILABLE = False
+    print("⚠️  osmium ei asennettu. Palvelutietojen haku ohitetaan.")
+    print("   Asenna: pip install osmium")
 
 def hae_paavo_data():
     """
@@ -167,6 +177,221 @@ def laske_etaisyydet_keskustoihin(postinumerokoordinaatit):
     return etaisyydet
 
 
+def lataa_osm_tiedosto(tiedostonimi='finland-latest.osm.pbf'):
+    """
+    Lataa Suomen OSM-data Geofabrikista jos ei ole jo ladattu
+    """
+    if os.path.exists(tiedostonimi):
+        koko_mb = os.path.getsize(tiedostonimi) / (1024 * 1024)
+        print(f"   OSM-tiedosto löytyy: {tiedostonimi} ({koko_mb:.1f} MB)")
+        return tiedostonimi
+    
+    print(f"   Ladataan OSM-tiedosto Geofabrikista...")
+    print(f"   URL: https://download.geofabrik.de/europe/finland-latest.osm.pbf")
+    print(f"   Tämä kestää useita minuutteja (~230 MB)...")
+    
+    url = 'https://download.geofabrik.de/europe/finland-latest.osm.pbf'
+    
+    try:
+        # Ohita SSL-varmistus Windows-ympäristössä
+        import ssl
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        import urllib.request
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        
+        with urllib.request.urlopen(req, context=ssl_context, timeout=300) as response:
+            total_size = int(response.headers.get('Content-Length', 0))
+            downloaded = 0
+            
+            with open(tiedostonimi, 'wb') as f:
+                while True:
+                    chunk = response.read(8192)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size > 0:
+                        progress = (downloaded / total_size) * 100
+                        print(f"\r   Ladattu: {progress:.1f}% ({downloaded/(1024*1024):.1f} MB / {total_size/(1024*1024):.1f} MB)", end='')
+        
+        print(f"\n   ✅ Lataus valmis: {tiedostonimi}")
+        return tiedostonimi
+        
+    except Exception as e:
+        print(f"\n   ❌ Lataus epäonnistui: {e}")
+        print(f"   Voit ladata tiedoston manuaalisesti:")
+        print(f"   https://download.geofabrik.de/europe/finland-latest.osm.pbf")
+        return None
+
+
+class PalveluHandler(osmium.SimpleHandler):
+    """
+    Osmium handler joka kerää palvelutiedot kaikilta postinumeroalueilta
+    Käyttää postinumeroalueiden tarkkoja geometrioita (point-in-polygon)
+    """
+    def __init__(self, postinumero_geometriat):
+        super().__init__()
+        self.postinumero_geometriat = postinumero_geometriat
+        
+        # Alusta palvelulaskurit jokaiselle alueelle
+        self.palvelut = {}
+        for pno in postinumero_geometriat.keys():
+            self.palvelut[pno] = {
+                'kaupat': 0,
+                'koulut': 0,
+                'paivakodit': 0,
+                'liikuntapaikat': 0,
+                'terveysasemat': 0,
+                'julkinen_liikenne': 0
+            }
+        
+        self.kasitelty = 0
+    
+    def node(self, n):
+        """Käsitellään jokainen OSM-node"""
+        # Ohita nodet ilman tageja
+        if not n.tags:
+            return
+        
+        self.kasitelty += 1
+        if self.kasitelty % 100000 == 0:
+            print(f"\r   Käsitelty {self.kasitelty:,} nodea...", end='')
+        
+        node_lat = n.location.lat
+        node_lon = n.location.lon
+        point = Point(node_lon, node_lat)  # Shapely käyttää (lon, lat) järjestystä
+        
+        # Tarkista mihin palveluluokkaan kuuluu
+        tags = {tag.k: tag.v for tag in n.tags}
+        palvelutyyppi = None
+        
+        if tags.get('shop') in ['supermarket', 'convenience']:
+            palvelutyyppi = 'kaupat'
+        elif tags.get('amenity') == 'school':
+            palvelutyyppi = 'koulut'
+        elif tags.get('amenity') == 'kindergarten':
+            palvelutyyppi = 'paivakodit'
+        elif tags.get('leisure') in ['fitness_centre', 'sports_centre']:
+            palvelutyyppi = 'liikuntapaikat'
+        elif tags.get('amenity') in ['doctors', 'clinic', 'hospital']:
+            palvelutyyppi = 'terveysasemat'
+        elif tags.get('highway') == 'bus_stop' or tags.get('railway') in ['station', 'tram_stop', 'halt']:
+            palvelutyyppi = 'julkinen_liikenne'
+        
+        if not palvelutyyppi:
+            return
+        
+        # Tarkista mihin postinumeroalueeseen piste kuuluu (point-in-polygon)
+        for pno, geom in self.postinumero_geometriat.items():
+            if point.within(geom):
+                self.palvelut[pno][palvelutyyppi] += 1
+                break  # Piste voi kuulua vain yhteen alueeseen
+
+
+def lataa_postinumeroalueiden_geometriat(geojson_file='postinumerot_hinnat.geojson'):
+    """
+    Lataa postinumeroalueiden geometriat GeoJSON-tiedostosta
+    
+    Args:
+        geojson_file: GeoJSON-tiedoston polku
+    
+    Returns:
+        dict: postinumero -> shapely geometry -mappaus
+    """
+    print(f"\nLadataan postinumeroalueiden geometrioita...")
+    
+    if not os.path.exists(geojson_file):
+        print(f"   ❌ Tiedostoa ei löydy: {geojson_file}")
+        return {}
+    
+    try:
+        with open(geojson_file, 'r', encoding='utf-8') as f:
+            geojson_data = json.load(f)
+        
+        geometriat = {}
+        for feature in geojson_data.get('features', []):
+            props = feature.get('properties', {})
+            postinumero = props.get('postinumero')
+            
+            if postinumero and 'geometry' in feature:
+                # Muunna GeoJSON geometria shapely geometriaksi
+                geom = shape(feature['geometry'])
+                geometriat[postinumero] = geom
+        
+        print(f"   Ladattu {len(geometriat)} postinumeroalueen geometria")
+        return geometriat
+        
+    except Exception as e:
+        print(f"   ❌ Virhe geometrioiden latauksessa: {e}")
+        return {}
+
+
+def hae_palvelut_osm_geofabrik(postinumero_geometriat, osm_tiedosto='finland-latest.osm.pbf'):
+    """
+    Hae palvelutiedot OSM-tiedostosta (Geofabrik) kaikille postinumeroalueille
+    
+    Args:
+        postinumero_geometriat: dict postinumeroista ja niiden geometrioista (shapely)
+        osm_tiedosto: OSM .pbf tiedoston nimi
+    
+    Returns:
+        dict: palvelutiedot per postinumero
+    """
+    if not OSMIUM_AVAILABLE:
+        print("   ⚠️  osmium ei käytettävissä, ohitetaan palvelutiedot")
+        return {}
+    
+    print(f"\nHaetaan palvelutietoja OSM-datasta...")
+    print(f"   Tiedosto: {osm_tiedosto}")
+    print(f"   Käytetään tarkkoja postinumeroaluerajoja")
+    print(f"   Postinumeroalueita: {len(postinumero_geometriat)}")
+    print(f"   HUOM: Tämä kestää useita minuutteja...")
+    
+    # Tarkista että tiedosto on olemassa
+    if not os.path.exists(osm_tiedosto):
+        print(f"   ❌ Tiedostoa ei löydy: {osm_tiedosto}")
+        return {}
+    
+    # Luo handler ja parsita tiedosto
+    handler = PalveluHandler(postinumero_geometriat)
+    
+    try:
+        print(f"   Parsitaan OSM-tiedosto...")
+        handler.apply_file(osm_tiedosto)
+        print(f"\n   ✅ Käsitelty {handler.kasitelty:,} nodea")
+        
+        # Laske palveluindeksi jokaiselle alueelle
+        painot = {
+            'kaupat': 1.0,
+            'koulut': 1.5,
+            'paivakodit': 1.2,
+            'liikuntapaikat': 0.8,
+            'terveysasemat': 1.3,
+            'julkinen_liikenne': 0.5
+        }
+        
+        alueet_palveluilla = 0
+        for pno, palvelut in handler.palvelut.items():
+            palveluindeksi = sum(
+                palvelut[k] * painot[k] for k in palvelut.keys()
+            )
+            palvelut['palveluindeksi'] = round(palveluindeksi, 1)
+            
+            if palveluindeksi > 0:
+                alueet_palveluilla += 1
+        
+        print(f"   Alueita joilla palveluita: {alueet_palveluilla}/{len(postinumerokoordinaatit)}")
+        
+        return handler.palvelut
+        
+    except Exception as e:
+        print(f"   ❌ Virhe parsinnassa: {e}")
+        return {}
+
+
 def main():
     print("="*60)
     print("RIKASTAN ASUNTOHINTADATAA")
@@ -203,19 +428,39 @@ def main():
     # 3. Laske etäisyydet keskustoihin
     etaisyydet = laske_etaisyydet_keskustoihin(postinumerokoordinaatit)
     
-    # 4. Yhdistä kaikki data
+    # 4. Lataa postinumeroalueiden geometriat
+    postinumero_geometriat = lataa_postinumeroalueiden_geometriat()
+    
+    # 5. Hae palvelutiedot OSM-datasta (Geofabrik)
+    palvelut = {}
+    if OSMIUM_AVAILABLE and postinumero_geometriat:
+        print("\nPalvelutietojen haku OSM-datasta...")
+        osm_tiedosto = lataa_osm_tiedosto('finland-latest.osm.pbf')
+        
+        if osm_tiedosto:
+            palvelut = hae_palvelut_osm_geofabrik(
+                postinumero_geometriat, 
+                osm_tiedosto=osm_tiedosto
+            )
+    else:
+        if not OSMIUM_AVAILABLE:
+            print("\n⚠️  Palvelutietojen haku ohitettu (osmium ei asennettu)")
+        elif not postinumero_geometriat:
+            print("\n⚠️  Palvelutietojen haku ohitettu (geometriat puuttuvat)")
+    
+    # 6. Yhdistä kaikki data
     rikastettu_data = {}
     
     for postinumero in paavo_data.keys():
         rikastettu_data[postinumero] = {
             'paavo': paavo_data.get(postinumero, {}),
-            'etaisyydet': etaisyydet.get(postinumero, {})
+            'etaisyydet': etaisyydet.get(postinumero, {}),
+            'palvelut': palvelut.get(postinumero, {})
         }
     
-    # 5. Tallenna
+    # 7. Tallenna
     output_file = 'data/rikastettu_data.json'
     
-    import os
     os.makedirs('data', exist_ok=True)
     
     with open(output_file, 'w', encoding='utf-8') as f:
@@ -225,6 +470,9 @@ def main():
     print(f"   Postinumeroalueita: {len(rikastettu_data)}")
     print(f"   - Paavo-tiedot: {len(paavo_data)}")
     print(f"   - Etäisyydet: {len(etaisyydet)}")
+    if palvelut:
+        alueet_palveluilla = sum(1 for p in palvelut.values() if p.get('palveluindeksi', 0) > 0)
+        print(f"   - Palvelut: {len(palvelut)} ({alueet_palveluilla} alueella dataa)")
     print("="*60)
 
 
