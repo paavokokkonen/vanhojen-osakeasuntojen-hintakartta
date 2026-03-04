@@ -171,7 +171,7 @@ Avaa `kartta.html` selaimessa.
 - **Trendianalyysi:** 5 vuoden (2019-2024) lineaarinen regressio, volatiliteetti (keskihajonta), aktiivisuus (keskimääräiset kaupat)
 - **Väestödata:** 
   - Aikasarja 2015-2026 (12 vuotta × 3044 postinumeroaluetta ≈ 36,500 tietuetta)
-  - Huom: Paavo-data julkaistaan +2 vuoden viiveellä (pno_tilasto_2026 sisältää 31.12.2024 tilanteen)
+  - Huom: Paavo-data julkaistaan +1 vuoden viiveellä (pno_tilasto_2025 sisältää 31.12.2024 tilanteen)
 - **Datamäärä:** 
   - 18 vuotta (17 todellista + 1 ennuste)
   - 5 huoneistotyyppiä (1 painotettu keskiarvo + 4 yksittäistä tyyppiä)
@@ -306,10 +306,27 @@ Kartta päivittyy automaattisesti ilman manuaalista työtä:
 
 **Ideat:**
 
-- **Mobiilioptimeinti**
+- **✅ Mobiilioptimeinti** (osittain toteutettu 4.3.2026)
   - *Miksi:* Yhä useampi käyttäjä selaa karttaa puhelimella. Nykyinen käyttöliittymä on optimoitu desktop-käyttöön.
-  - *Toteutus:* CSS media queries. Sticky-headeri pienemmäksi. Controls alaspäin tai hamburger-valikkoon. Kartta täyskoko. Swipe animaatioille. Touch-zoom ja pan.
-  - *Esimerkki:* "Mobiilissa otsikko vie 60px, controls aukeaa alhaalta swipen myötä, kartta täyttää 100% näytöstä."
+  - *Toteutettu:*
+    - CSS media queries (@media max-width: 768px) lisätty
+    - Pienempi otsikko ja tiiviimmät kontrollit mobiilissa
+    - Muutoskartan inputs piilossa oletuksena, näytetään vain kun muutoskartta valittu
+    - Fonttikoot ja välimatkat optimoitu kosketusnäytöille
+    - Animaation play/pause ja speed-kontrollit näkyvissä mobiilissakin
+  - *Vielä toteutettavana:*
+    - Hamburger-valikko (nykyisin kontrollit piilossa oletuksena mobiilissa)
+    - Swipe-gesturet animaatioille
+    - Touch-optimoidut zoom-kontrollit
+  - *Esimerkki:* "Mobiilissa otsikko vie 50px (aiemmin 80px), controls aukeaa alhaalta kun muutoskartta valittu."
+
+- **✅ Animaatioiden alasvetovalikko** (toteutettu 4.3.2026)
+  - *Miksi:* Radio-painikkeet veivät liikaa tilaa, erityisesti mobiilissa
+  - *Toteutettu:* 
+    - Muutettu animaatiotyyppi radio-painikkeista dropdown-valikoksi
+    - Säästää tilaa ja selkeyttää käyttöliittymää
+    - Helpompi käyttää kosketusnäytöllä
+  - *Sijainti:* Animaation play/pause -napin vieressä
 
 - **Tumma tila** (dark mode)
   - *Miksi:* Vähentää silmien rasitusta hämärässä ja säästää energiaa OLED-näytöillä.
@@ -352,6 +369,13 @@ Kartta päivittyy automaattisesti ilman manuaalista työtä:
   - *Miksi:* Perheet arvostavat lähellä olevia kouluja ja päiväkoteja. Ikääntyneet arvostavat kauppoja.
   - *Toteutus:* OpenStreetMap Overpass API. Hae kaikki koulut, päiväkodit, kaupat. Laske etäisyys postinumeroalueen keskipisteestä lähimpään palveluun. Turf.js distance-funktio.
   - *Esimerkki:* "00100: Lähin koulu 320m, lähin kauppa 180m, lähin päiväkoti 410m."
+  - **⚠️ Haasteet (4.3.2026):**
+    - OpenStreetMap Overpass API kärsii vakavista rate limit -ongelmista
+    - Yritettiin hakea palvelutietoja (kaupat, koulut, päiväkodit, liikuntapaikat, terveysasemat, julkinen liikenne) 1 km säteellä postinumeroalueen keskipisteestä
+    - Tulokset: 0/10 onnistunutta hakua - kaikki pyynnöt epäonnistuivat joko `429 Too Many Requests` tai `504 Gateway Timeout` virheisiin
+    - Kokeiltu ratkaisut: pyyntöjen välissä 5-10s odotusajat, batch-koko rajoitettu 10:een, SSL-varmennuksen ohitus (Windows-ympäristö)
+    - Johtopäätös: Julkinen Overpass API ei skaalaudu 1700+ postinumeroalueen datan hakemiseen. Vaatisi joko oman Overpass-palvelimen tai vaihtoehtoisen datalähteen (esim. OSM planet dump + paikallinen tietokanta)
+    - Ominaisuus jätetty toistaiseksi toteuttamatta API:n epäluotettavuuden vuoksi
 
 - **Uudiskohteet** (rakenteilla olevat asunnot)
   - *Miksi:* Isot rakennusprojektit voivat vaikuttaa alueen hintoihin (lisää tarjontaa → hinnat laskevat, tai parantaa alueen imagoa → hinnat nousevat).

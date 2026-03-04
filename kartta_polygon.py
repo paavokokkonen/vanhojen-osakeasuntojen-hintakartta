@@ -148,10 +148,6 @@ html = f'''<!DOCTYPE html>
             align-items: center;
             gap: 10px;
         }}
-        #controls input[type="radio"] {{
-            margin-left: 10px;
-            margin-right: 4px;
-        }}
         
         #stats {{
             display: flex;
@@ -235,6 +231,57 @@ html = f'''<!DOCTYPE html>
         
         /* Mobiili */
         @media (max-width: 768px) {{
+            #header {{
+                padding: 12px 15px;
+            }}
+            #header h1 {{
+                font-size: 18px;
+                margin-bottom: 3px;
+            }}
+            #header p {{
+                font-size: 12px;
+            }}
+            #header .forecast-note {{
+                font-size: 10px;
+            }}
+            
+            #controls {{
+                padding: 10px 15px;
+                gap: 10px;
+            }}
+            #controls .control-group {{
+                flex-basis: 100%;
+                gap: 5px;
+            }}
+            #controls select {{
+                font-size: 13px;
+                padding: 5px 8px;
+                width: 100%;
+            }}
+            #controls label {{
+                font-size: 12px;
+            }}
+            
+            #stats {{
+                padding: 10px 15px;
+                gap: 10px;
+            }}
+            .stat-box {{
+                padding: 8px 12px;
+                flex: 1;
+                min-width: 80px;
+            }}
+            .stat-box .label {{
+                font-size: 10px;
+            }}
+            .stat-box .value {{
+                font-size: 16px;
+            }}
+            
+            #map {{
+                height: calc(100vh - 320px);
+            }}
+            
             .city-buttons {{
                 display: none; /* Piilota pienillä näytöillä */
             }}
@@ -242,6 +289,20 @@ html = f'''<!DOCTYPE html>
                 top: 10px;
                 right: 10px;
                 left: auto;
+            }}
+            #search-box input {{
+                width: 150px;
+                font-size: 13px;
+            }}
+            
+            .popup-content {{
+                min-width: 180px;
+            }}
+            .popup-content h3 {{
+                font-size: 16px;
+            }}
+            .popup-content .price {{
+                font-size: 20px;
             }}
         }}
     </style>
@@ -283,20 +344,14 @@ html = f'''<!DOCTYPE html>
         </div>
         
         <div class="control-group">
-            <input type="radio" id="mode-absolute" name="mode" value="absolute" checked onchange="updateMap()">
-            <label for="mode-absolute">Absoluuttinen</label>
-            
-            <input type="radio" id="mode-change" name="mode" value="change" onchange="updateMap()">
-            <label for="mode-change">Muutos-%</label>
-            
-            <input type="radio" id="mode-analysis" name="mode" value="analysis" onchange="updateMap()">
-            <label for="mode-analysis">Analyysi (5v trendi)</label>
-            
-            <input type="radio" id="mode-animation" name="mode" value="animation" onchange="updateMap()">
-            <label for="mode-animation">Animaatio: Kartta</label>
-            
-            <input type="radio" id="mode-animation-chart" name="mode" value="animation-chart" onchange="updateMap()">
-            <label for="mode-animation-chart">Animaatio: Diagrammi</label>
+            <label for="view-mode-select">Näkymä:</label>
+            <select id="view-mode-select" onchange="updateMap()">
+                <option value="absolute" selected>Absoluuttinen</option>
+                <option value="change">Muutos-%</option>
+                <option value="analysis">Analyysi (5v trendi)</option>
+                <option value="animation">Animaatio: Kartta</option>
+                <option value="animation-chart">Animaatio: Diagrammi</option>
+            </select>
         </div>
         
         <div class="control-group" id="year-selector-single">
@@ -490,7 +545,7 @@ html = f'''<!DOCTYPE html>
         
         // Päivitä kartta
         function updateMap() {{
-            var mode = document.querySelector('input[name="mode"]:checked').value;
+            var mode = document.getElementById('view-mode-select').value;
             var buildingType = document.getElementById('building-type-select').value;
             var metric = document.getElementById('metric-select').value;
             
@@ -620,9 +675,9 @@ html = f'''<!DOCTYPE html>
                         
                         // Lisää väestötiedot jos saatavilla
                         if (props.paavo_aikasarja) {{
-                            // Paavo-data on -2v (pno_tilasto_2026 = 31.12.2024)
-                            // Joten asuntohintavuoteen lisätään +2 kun haetaan väestötietoja
-                            var targetPaavoVuosi = parseInt(selectedYear) + 2;
+                            // Paavo-data on -1v (pno_tilasto_2025 = 31.12.2024)
+                            // Joten asuntohintavuoteen lisätään +1 kun haetaan väestötietoja
+                            var targetPaavoVuosi = parseInt(selectedYear) + 1;
                             var vuodet = Object.keys(props.paavo_aikasarja).map(Number).sort((a, b) => b - a);
                             var maxPaavoVuosi = vuodet[0]; // Suurin saatavilla oleva vuosi
                             
@@ -647,7 +702,7 @@ html = f'''<!DOCTYPE html>
                                 var paavoVuosi = vuodet.find(v => v <= targetPaavoVuosi);
                                 if (paavoVuosi && props.paavo_aikasarja[paavoVuosi]) {{
                                     var paavo = props.paavo_aikasarja[paavoVuosi];
-                                    var naytettavaVuosi = paavoVuosi - 2; // Muunna takaisin asuntohintavuodeksi
+                                    var naytettavaVuosi = paavoVuosi - 1; // Muunna takaisin asuntohintavuodeksi
                                     popupContent += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
                                         '<strong>👥 Väestötiedot (' + naytettavaVuosi + '):</strong><br>' +
                                         'Asukkaat: ' + paavo.vaesto.toLocaleString() + '<br>' +
@@ -658,6 +713,7 @@ html = f'''<!DOCTYPE html>
                                 }}
                             }}
                         }}
+                        
                         popupContent += '</div>';
                     }} else {{
                         popupContent = '<div class="popup-content">' +
@@ -667,8 +723,8 @@ html = f'''<!DOCTYPE html>
                         
                         // Lisää väestötiedot myös kun ei kauppoja
                         if (props.paavo_aikasarja) {{
-                            // Paavo-data on -2v (pno_tilasto_2026 = 31.12.2024)
-                            var targetPaavoVuosi = parseInt(selectedYear) + 2;
+                            // Paavo-data on -1v (pno_tilasto_2025 = 31.12.2024)
+                            var targetPaavoVuosi = parseInt(selectedYear) + 1;
                             var vuodet = Object.keys(props.paavo_aikasarja).map(Number).sort((a, b) => b - a);
                             var maxPaavoVuosi = vuodet[0];
                             
@@ -690,7 +746,7 @@ html = f'''<!DOCTYPE html>
                                 var paavoVuosi = vuodet.find(v => v <= targetPaavoVuosi);
                                 if (paavoVuosi && props.paavo_aikasarja[paavoVuosi]) {{
                                     var paavo = props.paavo_aikasarja[paavoVuosi];
-                                    var naytettavaVuosi = paavoVuosi - 2;
+                                    var naytettavaVuosi = paavoVuosi - 1;
                                     popupContent += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
                                         '<strong>👥 Väestötiedot (' + naytettavaVuosi + '):</strong><br>' +
                                         'Asukkaat: ' + paavo.vaesto.toLocaleString() + '<br>' +
@@ -701,6 +757,7 @@ html = f'''<!DOCTYPE html>
                                 }}
                             }}
                         }}
+                        
                         popupContent += '</div>';
                     }}
                     layer.bindPopup(popupContent);
@@ -855,9 +912,9 @@ html = f'''<!DOCTYPE html>
                         
                         // Lisää väestötietojen muutokset 5v ajalta
                         if (props.paavo_aikasarja) {{
-                            // Laske muutokset: 2021 -> 2025 (Paavo 2023 -> 2027, mutta käytä saatavilla olevaa)
-                            var paavoAlku = 2023; // 2021 + 2
-                            var paavoLoppu = 2027; // 2025 + 2
+                            // Laske muutokset: 2021 -> 2025 (Paavo 2022 -> 2026, mutta käytä saatavilla olevaa)
+                            var paavoAlku = 2022; // 2021 + 1
+                            var paavoLoppu = 2026; // 2025 + 1
                             var vuodet = Object.keys(props.paavo_aikasarja).map(Number).sort();
                             
                             // Etsi lähimmät saatavilla olevat vuodet
@@ -879,8 +936,8 @@ html = f'''<!DOCTYPE html>
                                 var tuloSign = tuloMuutos >= 0 ? '+' : '';
                                 var tyottomyysSign = tyottomyysMuutos >= 0 ? '+' : '';
                                 
-                                var naytettavaAlku = alkuVuosi - 2;
-                                var naytettavaLoppu = loppuVuosi - 2;
+                                var naytettavaAlku = alkuVuosi - 1;
+                                var naytettavaLoppu = loppuVuosi - 1;
                                 
                                 popupContent += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
                                     '<strong>👥 Väestömuutokset (' + naytettavaAlku + '-' + naytettavaLoppu + ')</strong><br>' +

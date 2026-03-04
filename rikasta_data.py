@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-Rikasta asuntohintadata väestötiedoilla ja palveluilla
-=======================================================
+Rikasta asuntohintadata väestötiedoilla
+=============================================
 Hakee:
 - Paavo-väestötiedot (Tilastokeskus)
-- Palvelujen määrät (OpenStreetMap)
 - Etäisyydet keskustoihin
 """
 
@@ -168,148 +167,6 @@ def laske_etaisyydet_keskustoihin(postinumerokoordinaatit):
     return etaisyydet
 
 
-def hae_palvelut_osm(lat, lon, sade_km=1.0):
-    """
-    Hae palvelujen määrät OpenStreetMap Overpass API:sta
-    
-    Parametrit:
-    - lat, lon: keskipisteen koordinaatit
-    - sade_km: hakusäde kilometreinä
-    """
-    
-    sade_m = sade_km * 1000
-    
-    # Overpass API -kysely
-    overpass_url = "https://overpass-api.de/api/interpreter"
-    
-    # Haetaan:
-    # - Ruokakaupat (shop=supermarket, shop=convenience)
-    # - Koulut (amenity=school)
-    # - Päiväkodit (amenity=kindergarten)
-    # - Liikuntapaikat (leisure=fitness_centre, leisure=sports_centre)
-    # - Terveysasemat (amenity=doctors, amenity=clinic)
-    # - Julkinen liikenne (highway=bus_stop, railway=station, railway=tram_stop)
-    
-    query = f"""
-    [out:json][timeout:25];
-    (
-      node["shop"~"supermarket|convenience"](around:{sade_m},{lat},{lon});
-      way["shop"~"supermarket|convenience"](around:{sade_m},{lat},{lon});
-      
-      node["amenity"="school"](around:{sade_m},{lat},{lon});
-      way["amenity"="school"](around:{sade_m},{lat},{lon});
-      
-      node["amenity"="kindergarten"](around:{sade_m},{lat},{lon});
-      way["amenity"="kindergarten"](around:{sade_m},{lat},{lon});
-      
-      node["leisure"~"fitness_centre|sports_centre"](around:{sade_m},{lat},{lon});
-      way["leisure"~"fitness_centre|sports_centre"](around:{sade_m},{lat},{lon});
-      
-      node["amenity"~"doctors|clinic"](around:{sade_m},{lat},{lon});
-      way["amenity"~"doctors|clinic"](around:{sade_m},{lat},{lon});
-      
-      node["highway"="bus_stop"](around:{sade_m},{lat},{lon});
-      node["railway"~"station|tram_stop|halt"](around:{sade_m},{lat},{lon});
-    );
-    out count;
-    """
-    
-    try:
-        response = requests.post(overpass_url, data={'data': query}, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        
-        # Laske palvelujen määrät tyypeittäin
-        palvelut = {
-            'kaupat': 0,
-            'koulut': 0,
-            'paivakodit': 0,
-            'liikuntapaikat': 0,
-            'terveysasemat': 0,
-            'julkinen_liikenne': 0
-        }
-        
-        for element in data.get('elements', []):
-            tags = element.get('tags', {})
-            
-            if 'shop' in tags:
-                palvelut['kaupat'] += 1
-            elif tags.get('amenity') == 'school':
-                palvelut['koulut'] += 1
-            elif tags.get('amenity') == 'kindergarten':
-                palvelut['paivakodit'] += 1
-            elif 'leisure' in tags:
-                palvelut['liikuntapaikat'] += 1
-            elif tags.get('amenity') in ['doctors', 'clinic']:
-                palvelut['terveysasemat'] += 1
-            elif 'highway' in tags or 'railway' in tags:
-                palvelut['julkinen_liikenne'] += 1
-        
-        # Laske palveluindeksi (painotettu summa)
-        painot = {
-            'kaupat': 1.0,
-            'koulut': 1.5,
-            'paivakodit': 1.2,
-            'liikuntapaikat': 0.8,
-            'terveysasemat': 1.3,
-            'julkinen_liikenne': 0.5
-        }
-        
-        palveluindeksi = sum(
-            palvelut[k] * painot[k] for k in palvelut.keys()
-        )
-        
-        palvelut['palveluindeksi'] = round(palveluindeksi, 1)
-        
-        return palvelut
-        
-    except Exception as e:
-        print(f"   Virhe palveluiden haussa ({lat}, {lon}): {e}")
-        return {
-            'kaupat': 0,
-            'koulut': 0,
-            'paivakodit': 0,
-            'liikuntapaikat': 0,
-            'terveysasemat': 0,
-            'julkinen_liikenne': 0,
-            'palveluindeksi': 0
-        }
-
-
-def laske_palvelut_kaikille(postinumerokoordinaatit, max_requests=50):
-    """
-    Laske palvelut kaikille postinumeroalueille
-    HUOM: Rajoitettu määrä pyyntöjä Overpass API:n kuormituksen välttämiseksi
-    """
-    print(f"Lasketaan palveluita (max {max_requests} aluetta)...")
-    print("HUOM: Tämä kestää useita minuutteja Overpass API:n rate limitin vuoksi")
-    
-    palvelut_dict = {}
-    count = 0
-    
-    for postinumero, coords in postinumerokoordinaatit.items():
-        if count >= max_requests:
-            print(f"   Saavutettu maksimimäärä ({max_requests})")
-            break
-        
-        lat, lon = coords['lat'], coords['lon']
-        
-        palvelut = hae_palvelut_osm(lat, lon, sade_km=1.0)
-        palvelut_dict[postinumero] = palvelut
-        
-        count += 1
-        
-        # Rate limiting: odota 2 sekuntia pyyntöjen välissä
-        if count % 10 == 0:
-            print(f"   Käsitelty {count}/{min(max_requests, len(postinumerokoordinaatit))}...")
-            time.sleep(2)
-        else:
-            time.sleep(0.5)
-    
-    print(f"   Laskettu palvelut {len(palvelut_dict)} postinumeroalueelle")
-    return palvelut_dict
-
-
 def main():
     print("="*60)
     print("RIKASTAN ASUNTOHINTADATAA")
@@ -327,7 +184,12 @@ def main():
         # Muunna oikeaan muotoon
         postinumerokoordinaatit = {}
         for postinumero, coords in koordinaatit_raw.items():
-            if isinstance(coords, list) and len(coords) == 2:
+            # Tarkista onko dict-muodossa (uusi) vai lista-muodossa (vanha)
+            if isinstance(coords, dict) and 'lat' in coords and 'lon' in coords:
+                # Uusi muoto: {"lat": ..., "lon": ...}
+                postinumerokoordinaatit[postinumero] = coords
+            elif isinstance(coords, list) and len(coords) == 2:
+                # Vanha muoto: [lon, lat]
                 postinumerokoordinaatit[postinumero] = {
                     'lat': coords[1],  # lat, lon järjestys
                     'lon': coords[0]
@@ -341,21 +203,16 @@ def main():
     # 3. Laske etäisyydet keskustoihin
     etaisyydet = laske_etaisyydet_keskustoihin(postinumerokoordinaatit)
     
-    # 4. Hae palvelut (rajattu määrä API-rajoitusten vuoksi)
-    # Priorisoidaan suuret kaupungit
-    palvelut = laske_palvelut_kaikille(postinumerokoordinaatit, max_requests=100)
-    
-    # 5. Yhdistä kaikki data
+    # 4. Yhdistä kaikki data
     rikastettu_data = {}
     
     for postinumero in paavo_data.keys():
         rikastettu_data[postinumero] = {
             'paavo': paavo_data.get(postinumero, {}),
-            'etaisyydet': etaisyydet.get(postinumero, {}),
-            'palvelut': palvelut.get(postinumero, {})
+            'etaisyydet': etaisyydet.get(postinumero, {})
         }
     
-    # 6. Tallenna
+    # 5. Tallenna
     output_file = 'data/rikastettu_data.json'
     
     import os
@@ -368,7 +225,6 @@ def main():
     print(f"   Postinumeroalueita: {len(rikastettu_data)}")
     print(f"   - Paavo-tiedot: {len(paavo_data)}")
     print(f"   - Etäisyydet: {len(etaisyydet)}")
-    print(f"   - Palvelut: {len(palvelut)}")
     print("="*60)
 
 
