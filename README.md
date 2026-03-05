@@ -73,15 +73,29 @@ Interaktiivinen kartta Suomen asuntojen keskihinnoista ja kauppamääristä post
 
 ### 🏪 Palvelutiedot (OpenStreetMap)
 - **Datalähde:** Geofabrik finland-latest.osm.pbf (~676 MB, päivittyy päivittäin)
-- **Laskentamenetelmä:** Point-in-polygon tarkistus postinumeroalueen tarkoilla rajoilla
+- **Laskentamenetelmä:** Point-in-polygon tarkistus postinumeroalueen tarkoilla rajoilla (osmium-parseri)
 - **Palvelukategoriat:** (6 kpl)
-  - 🛒 Kaupat (shop=supermarket, shop=convenience, shop=mall)
-  - 🏫 Koulut (amenity=school)
-  - 🧒 Päiväkodit (amenity=kindergarten)
-  - 💪 Liikuntapaikat (leisure=sports_centre, leisure=fitness_centre, leisure=stadium, leisure=pitch)
-  - 🏥 Terveysasemat (amenity=clinic, amenity=doctors, amenity=hospital)
-  - 🚌 Julkinen liikenne (railway=*, public_transport=stop_position)
-- **Palveluindeksi:** Painotettu keskiarvo (kaupat 30%, julkinen liikenne 25%, koulut 15%, päiväkodit 15%, liikuntapaikat 10%, terveysasemat 5%)
+  - 🛒 Kaupat (`shop=supermarket`, `shop=convenience`)
+  - 🏫 Koulut (`amenity=school`)
+  - 🧒 Päiväkodit (`amenity=kindergarten`)
+  - 💪 Liikuntapaikat (`leisure=fitness_centre`, `leisure=sports_centre`)
+  - 🏥 Terveysasemat (`amenity=doctors`, `amenity=clinic`, `amenity=hospital`)
+  - 🚌 Julkinen liikenne (`highway=bus_stop`, `railway=station`, `railway=tram_stop`, `railway=halt`)
+- **Palveluindeksi** — tiheyyspohjainen, logaritmisesti skaalattu:
+  ```
+  palveluindeksi = Σ wₖ · ln(1 + nₖ / A)
+  ```
+  missä `nₖ` = palvelukategorian k lukumäärä, `A` = postinumeroalueen pinta-ala (km²), `wₖ` = paino:
+  | Kategoria | Paino (wₖ) |
+  |-----------|-----------|
+  | Koulut | 1.5 |
+  | Terveysasemat | 1.3 |
+  | Päiväkodit | 1.2 |
+  | Kaupat | 1.0 |
+  | Liikuntapaikat | 0.8 |
+  | Julkinen liikenne | 0.5 |
+
+  Logaritminen skaalaus ja pinta-alanormalisointi estävät suurten maaseutualueiden raakamäärien (esim. sadat bussipysäkit pitkien teiden varrella) dominointia. Tyypilliset arvot: 0–15 (Helsinki kantakaupunki ~10–15, kaupunkikeskustat ~5–8, maaseutu <1).
 - **Kattavuus:** 1134/1723 postinumeroalueella palvelutietoja (66%)
 - **Huom:** Palvelut ovat snapshot nykyhetkestä, ei aikasarjaa
 
@@ -231,6 +245,72 @@ Kartta päivittyy automaattisesti ilman manuaalista työtä:
 
 ## 💡 Kehitysideat (Tulevat ominaisuudet)
 
+### 📚 Kirjallisuuskatsaukseen perustuvat ideat
+
+Alla olevat ideat nousevat suoraan tutkimuskirjallisuudesta (ks. Kirjallisuuskatsaus-osio). Ne on ryhmitelty toteutettavuuden ja odotetun lisäarvon mukaan.
+
+#### A. Ennustemallit — tutkimuspohjaiset parannukset
+
+| Idea | Tutkimusperusta | Toteutus | Prioriteetti |
+|------|----------------|----------|-------------|
+| **Korkotaso eksogenisenä muuttujana** | Himmelberg ym. (2005): korko on tärkein makroselittäjä. 1 %-yksikön muutos → 5–10 % hintavaikutus | Hae 12 kk Euribor Suomen Pankista. SARIMAX-malli `exog=[euribor]`. Sama korkosarja kaikille alueille. | ⭐ Korkea |
+| **Tulotaso ja työttömyys ennusteissa** | Holly & Jones (1997): tulot ja hinnat yhteisintegroituneita | Paavo-data on jo käytettävissä. Lisää aluetason tulot ja työttömyys SARIMAX-mallin eksogenisinä muuttujina. | ⭐ Korkea |
+| **Väestönmuutos ennusteissa** | Mankiw & Weil (1989): työikäinen väestö ennustaa kysyntää | Paavo-väestödata aikasarjana 2015–2026. Lisää väestönmuutos-% eksogenisena muuttujana. | ⭐ Korkea |
+| **Hedoninen hintamalli** | Rosen (1974): hinta = ominaisuuksien summa | Regressiomalli: hinta ~ palveluindeksi + tulotaso + väkiluku + keski-ikä + työttömyys. Poikkileikkausennuste. | Keskitaso |
+| **Spatiaalinen autoregressio (SAR)** | LeSage & Pace (2009): naapurialueet vaikuttavat toisiinsa | Lisää naapurialueiden hinnat selittäjäksi (spatial lag). `spreg`- tai `pysal`-kirjasto. | Matala (monimutkainen) |
+
+**Konkreettinen toteutusesimerkki — Euribor-malli:**
+```python
+# laske_ennusteet.py — lisää korkotaso eksogenisenä muuttujana
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+import pandas as pd
+
+# Hae 12kk Euribor (Suomen Pankki / ECB)
+euribor = pd.Series({2015: 0.06, 2016: -0.01, 2017: -0.19, 2018: -0.17,
+                      2019: -0.26, 2020: -0.30, 2021: -0.50, 2022: 0.57,
+                      2023: 3.86, 2024: 3.55, 2025: 2.50})
+
+# Ennustevuoden korko (ECB forward rate tai oletus)
+euribor_ennuste = pd.Series({2026: 2.20})
+
+model = SARIMAX(hinnat, exog=euribor, order=(1,1,1))
+results = model.fit()
+ennuste = results.forecast(steps=1, exog=euribor_ennuste)
+```
+
+#### B. Karttanäkymät — uudet kerrokset kirjallisuudesta
+
+| Idea | Tutkimusperusta | Datalähde | Prioriteetti |
+|------|----------------|-----------|-------------|
+| **Kohtuuhintaisuusindeksi (affordability)** | Himmelberg ym. (2005): user cost of housing | ✅ Jo toteutettu (hinta/tulot-suhde) | ✅ Valmis |
+| **P/R-ratio (hinta/vuokra-suhde)** | Brännback & Oikarinen (2019): P/R-ratio kertoo yli/aliarvostuksesta | Omistushinnat + vuokradata jo käytettävissä. Laske `ostohinta / (vuosivuokra)`. Näytä kartalla. | ⭐ Korkea |
+| **Matka-aikakartta (isokroni)** | Alonso (1964), Laakso (1997): saavutettavuus #1 hintaselittäjä | Digitransit/HERE API → matka-aika keskustaan minuuteissa. Värikarttaleiri minuuttien mukaan. | ⭐ Korkea |
+| **Koulujen laatu** | Black (1999), Harjunen ym. (2018): koulun laatu → 2–5 % hintavaikutus | Opetushallituksen Vipunen-tietopalvelu: oppimistulokset alueittain | Keskitaso |
+| **Rikollisuuskartta** | Gibbons (2004): -10 % rikoksia → +1–3 % hintoja | Poliisi / tilastokeskus: rikokset kunnittain | Keskitaso |
+| **Viheralueindeksi** | Votsis & Perrels (2016): viheralueet +3–5 % Suomessa | OSM: `leisure=park`, `natural=wood` → pinta-ala per postinumero | Keskitaso |
+| **Kaavoitus ja rakennusoikeus** | Saiz (2010), Glaeser ym. (2005): tarjontarajoitteet nostavat hintoja | Kuntien avoin kaavoitusdata (vaihtelee kunnittain) | Matala (saatavuus) |
+| **Käveltävyysindeksi (walkability)** | Pope & Pope (2015): palvelujen läheisyys nostaa hintoja | OSM-data + etäisyyslaskelma: montako palvelua 500m / 1km säteellä | Keskitaso |
+
+#### C. Analyysityökalut — tutkimuspohjaiset
+
+| Idea | Tutkimusperusta | Toteutus |
+|------|----------------|----------|
+| **Regression-pohjainen hintadekomponointi** | Rosen (1974): hedoninen hinta = osien summa | Sovita OLS: `hinta ~ tulotaso + palveluindeksi + väkiluku + keski_ika + työttömyys`. Näytä kunkin tekijän euro-osuus. "Tämän alueen hinnasta 35 % selittyy tulotasolla, 20 % palveluilla…" |
+| **Bubble detector (yliarvostus)** | Case & Shiller (1989): spekulaatio ajaa hintoja fundamentaalien yli | Laske `toteutunut_hinta / selitetty_hinta` (residuaali). Jos > 1.2 → mahdollinen kupla. Väritä kartalla punaiseksi. |
+| **Palveluindeksi vs. hinta (scatter)** | Black (1999), Pope & Pope (2015) | ✅ Jo kehitysideana. Scatter plot + regressiosuora. R²-arvo näkyviin. |
+| **Muuttoliikkeen vaikutusanalyysi** | Tervo (2000), Aro (2007) | Paavo-väestömuutos → korrelaatio hintatrendin kanssa. Näytä nuolikartta: mistä mihin ihmiset muuttavat. |
+
+#### D. Prioriteettijärjestys (kirjallisuuden perusteella)
+
+Tutkimuskirjallisuuden selitysvoiman ja teknisen toteutettavuuden perusteella suositeltu toteutusjärjestys:
+
+1. **🥇 P/R-ratio kartalle** — helppo toteuttaa (data on), korkea informaatioarvo sijoittajille
+2. **🥇 Euribor eksogenisenä** — suurin yksittäinen ennustemallin parannus, data helppo hakea
+3. **🥈 Tulotaso + väestö ennusteissa** — Paavo-data jo käytössä, vain mallipäivitys
+4. **🥈 Matka-aikakartta** — #1 hintaselittäjä, mutta API-integraatio vaatii työtä
+5. **🥉 Hedoninen regressio** — kokonaisvaltainen selittävä malli, vaatii tilastotieteen osaamista
+6. **🥉 Viheralueindeksi OSM:stä** — OSM-data ja parseri jo olemassa, vain uusi kategoria
+
 ### 1. Ennustemallien parantaminen
 
 **Tavoite:** Parantaa ennusteiden tarkkuutta ja antaa käyttäjille parempi käsitys ennusteiden epävarmuudesta.
@@ -238,15 +318,8 @@ Kartta päivittyy automaattisesti ilman manuaalista työtä:
 **Ideat:**
 
 - **Prophet-malli** (Facebookin aikasarja-ennuste)
-  - *Miksi:* Prophet käsittelee automaattisesti kausivaihttelua, trendien muutoksia ja poikkeavia arvoja. Soveltuu hyvin asuntomarkkinadataan, jossa on kausiluontoista vaihtelua (kesä vs. talvi).
+  - *Miksi:* Prophet käsittelee automaattisesti trendien muutoksia ja poikkeavia arvoja. Soveltuu hyvin asuntomarkkinadataan.
   - *Toteutus:* `fbprophet`-kirjasto, lisää ~60MB riippuvuuksia. Vaatii vähintään 2 vuoden dataa per alue.
-  - *Esimerkki:* "Helsinki 00100: Prophet ennustaa hinnan nousua 3.2% vuonna 2026, ottaen huomioon kevään ja syksyn kauppasesongin."
-
-- **LSTM-neuroverkko** (syväoppimismalli pitkille aikasarjoille)
-  - *Miksi:* LSTM oppii pitkän aikavälin riippuvuuksia datasta ja voi havaita monimutkaisia trendejä. Toimii hyvin alueilla, joissa on riittävästi historiadataa.
-  - *Toteutus:* TensorFlow/Keras, lisää ~500MB riippuvuuksia. Vaatii harjoittelua, joka kestää useita minuutteja.
-  - *Haaste:* Vaatii paljon dataa (>10 vuotta) ja laskentaa. Ei välttämättä toimi alueilla, joilla vain vähän kauppoja.
-  - *Esimerkki:* "LSTM malli tunnistaa, että Kallio-alueella hinnat nousevat nopeammin kuin lineaarinen trendi ennustaa."
 
 - **Luottamusvälit ennusteille** (ennusteen epävarmuus)
   - *Miksi:* Ennuste on aina epävarma. Luottamusvälit (esim. 80%, 95%) kertovat, kuinka varmoja voimme olla ennusteesta.
@@ -254,56 +327,46 @@ Kartta päivittyy automaattisesti ilman manuaalista työtä:
   - *Esimerkki:* "00100: Ennuste 7400 €/m² (95% luottamusväli: 6800-8000 €/m²)"
 
 - **Useamman vuoden ennusteet** (2027-2030)
-  - *Miksi:* Pitkäaikaiset sijoittajat ja kaupunkisuunnittelijat hyötyvät pidemmän aikavälin ennusteista.
-  - *Haaste:* Epävarmuus kasvaa jyrkästi jokaista vuotta kohden. 5 vuoden ennuste on hyvin epävarma.
-  - *Toteutus:* Käytä malleja, jotka palauttavat useita askelia eteenpäin. Näytä growing luottamusvälit.
+  - *Miksi:* Pitkäaikaiset sijoittajat hyötyvät pidemmän aikavälin ennusteista.
+  - *Haaste:* Epävarmuus kasvaa jyrkästi jokaista vuotta kohden.
+  - *Toteutus:* Käytä malleja, jotka palauttavat useita askelia eteenpäin. Näytä kasvavat luottamusvälit.
 
 - **Mallivertailu ja tarkkuusmetriikat**
   - *Miksi:* Eri mallit sopivat eri alueille. Käyttäjän pitäisi tietää, miten luotettava ennuste on.
-  - *Toteutus:* Laske RMSE (Root Mean Square Error), MAE (Mean Absolute Error), R² (selitysaste) vertaamalla 2020-2024 ennusteita todelliseen dataan. Näytä parhaiten toiminut malli per alue.
+  - *Toteutus:* Laske RMSE, MAE, R² vertaamalla 2020-2024 ennusteita todelliseen dataan. Näytä parhaiten toiminut malli per alue.
   - *Esimerkki:* "00100: ARIMA paras (RMSE=142 €/m²), Linear keskinkertainen (RMSE=218 €/m²)"
 
 - **Eksogeniset muuttujat** (ulkoiset tekijät)
-  - *Miksi:* Asuntohintoihin vaikuttavat Euribor-korot, työttömyys, väestönkasvu. Malli, joka ottaa nämä huomioon, on tarkempi.
-  - *Toteutus:* Hae Euribor-korot, työttömyysprosentit Tilastokeskuksesta. Käytä SARIMAX- tai Prophet-mallissa eksogenisina muuttujina.
-  - *Esimerkki:* "Kun Euribor nousee 1%, hinnat laskevat keskimäärin 2.3% seuraavan vuoden aikana."
+  - *Miksi:* Asuntohintoihin vaikuttavat Euribor-korot, työttömyys, väestönkasvu.
+  - *Toteutus:* Hae Euribor-korot ja työttömyysprosentit Tilastokeskuksesta. Käytä SARIMAX-mallissa eksogenisina muuttujina.
 
 ### 2. Korrelaatioanalyysi ja data-visualisointi
 
-**Tavoite:** Auttaa käyttäjiä ymmärtämään, mitkä tekijät vaikuttavat asuntohintoihin ja nähdä trendejä kartalla helpommin.
+**Tavoite:** Auttaa käyttäjiä ymmärtämään, mitkä tekijät vaikuttavat asuntohintoihin ja nähdä trendejä helpommin.
 
 **Ideat:**
 
-- **Interaktiivinen korrelaatiomatriisi**
-  - *Miksi:* Käyttäjät voivat nähdä nopeasti, että esim. keskitulo korreloi 0.68 neliöhintojen kanssa, mutta työttömyys -0.42.
-  - *Toteutus:* Laske Pearsonin korrelaatiot hintdatan, väestödatan ja trendien välillä. Visualisoi lämpökarttana (heatmap) Chart.js:llä tai D3.js:llä.
-  - *Esimerkki:* "Suurin positiivinen korrelaatio: Keskitulo (0.68). Suurin negatiivinen: Työttömyys (-0.42)."
-
-- **Palveluindeksin vaikutus hintoihin**
-  - *Miksi:* Tutkia korrelaatiota palveluiden määrän ja asuntohintojen välillä. Ovatko hyvin palvellut alueet kalliimpia?
-  - *Toteutus:* Laske Pearsonin korrelaatio palveluindeksin ja neliöhinnan välillä. Scatter plot palveluindeksi vs. hinta. Näytä regressiosuora.
-  - *Hypoteesi:* Alueet, joilla paljon kauppoja ja julkista liikennettä, ovat yleensä kalliimpia.
-  - *Esimerkki:* "Palveluindeksi korreloi +0.52 neliöhintojen kanssa. Jokainen +10 palveluindeksin piste nostaa hintoja keskimäärin ~200 €/m²."
-
-- **Scatter plot -näkymä** (hajontakuvio)
-  - *Miksi:* Visualisoi alueita kahdessa ulottuvuudessa, esim. hinta vs. tulot. Käyttäjä voi tunnistaa outlier-alueita (kalliit mutta matala tulotaso).
-  - *Toteutus:* Uusi välilehti "Analyysi". Käyttäjä valitsee X- ja Y-akselin (esim. keskihinta, keskitulo, etäisyys keskustaan). Jokainen piste = postinumeroalue. Hover näyttää postinumeron.
-  - *Esimerkki:* "Käyttäjä näkee, että 00100 (Helsingin keskusta) on erillään muista: korkea hinta, korkea tulotaso."
-
-- **Aikasarjakaaviot** (line charts)
+- **Aikasarjakaaviot** (line charts) ✅ Toteutettu
   - *Miksi:* Yksittäisen alueen trendin näkeminen vuosittain on helpompaa viivakaaviosta kuin kartalta.
-  - *Toteutus:* Klikkaa postinumeroaluetta kartalla → aukea modal/sidebar, jossa viivakaaviossa näkyy 2009-2026 kehitys (hinnat, kaupat, väestö). Chart.js tai Plotly.
+  - *Toteutus:* Klikkaa postinumeroaluetta kartalla → popupissa "📊 Näytä aikasarja" -nappi → avaa sivupaneelin Chart.js-viivakaavioilla: hintakehitys, kaupat, vuokrat, vuokratuotto, väestö & keski-ikä, tulotaso & työttömyys. Kaikki huoneistotyypit samassa kaaviossa.
   - *Esimerkki:* "00100: Hinta noussut tasaisesti 2009-2019 (+4.1%/v), romahdus 2020 (-3.2%), elpynyt 2021-2025 (+3.8%/v)."
 
-- **Histogrammit** (jakaumat)
-  - *Miksi:* Näyttää, miten hinnat jakautuvat koko maassa tai valitussa kaupungissa. Käyttäjä näkee, onko alue kalleimmassa 10%:ssa.
-  - *Toteutus:* Laske hintojen frekvenssit bineihin (esim. 2000-2500 €/m², 2500-3000 €/m²). Visualisoi palkkikaaviossa. Korosta valittu alue.
-  - *Esimerkki:* "Hintojen mediaani 3400 €/m². 00100 (7400 €/m²) on kalleimmassa 1%:ssa."
+- **Interaktiivinen korrelaatiomatriisi**
+  - *Miksi:* Käyttäjät voivat nähdä nopeasti, mitkä tekijät korreloivat hintojen kanssa.
+  - *Toteutus:* Laske Pearsonin korrelaatiot hintadatan, väestödatan ja trendien välillä. Visualisoi lämpökarttana.
 
-- **Heatmap-kalenteri** (kuukausittainen vaihtelu)
-  - *Miksi:* Kauppamäärät vaihtelevat kuukausittain (kesä/syksy aktiivinen, talvi hiljainen). Auttaa tunnistamaan parhaan kauppa-ajan.
-  - *Haaste:* Tilastokeskuksen data on vuositasolla, ei kuukausitasolla. Tarvitaan toinen datalähde (esim. Etuovi API, jos saatavilla).
-  - *Esimerkki:* "Kesäkuu 2024: 142 kauppaa. Tammikuu 2024: 87 kauppaa. Paras myyntikuukausi: Syyskuu."
+- **Palveluindeksin vaikutus hintoihin**
+  - *Miksi:* Tutkia korrelaatiota palveluiden määrän ja asuntohintojen välillä.
+  - *Toteutus:* Scatter plot palveluindeksi vs. hinta. Näytä regressiosuora.
+  - *Hypoteesi:* Alueet, joilla paljon kauppoja ja julkista liikennettä, ovat yleensä kalliimpia.
+
+- **Scatter plot -näkymä** (hajontakuvio)
+  - *Miksi:* Visualisoi alueita kahdessa ulottuvuudessa, esim. hinta vs. tulot. Käyttäjä voi tunnistaa outlier-alueita.
+  - *Toteutus:* Uusi välilehti "Analyysi". Käyttäjä valitsee X- ja Y-akselin. Jokainen piste = postinumeroalue.
+
+- **Histogrammit** (jakaumat)
+  - *Miksi:* Näyttää, miten hinnat jakautuvat koko maassa tai valitussa kaupungissa.
+  - *Toteutus:* Laske hintojen frekvenssit bineihin. Visualisoi palkkikaaviossa. Korosta valittu alue.
 
 ### 3. Aluevertailu ja benchmarking
 
@@ -313,82 +376,58 @@ Kartta päivittyy automaattisesti ilman manuaalista työtä:
 
 - **Multi-select aluevertailu** (monen alueen vertailu)
   - *Miksi:* Asunnon ostaja vertaa usein 2-5 aluetta keskenään. "Onko Kallio vai Vallila parempi sijoitus?"
-  - *Toteutus:* Shift+klikkaa postinumeroalueita kartalla → valitaan useita. Aukea vertailutaulukko tai rinnakkaiset viivakuviot. Näytä hinnat, trendit, väestö vierekkäin.
-  - *Esimerkki:* "Vertailu: 00530 (Munkkiniemi) vs. 00570 (Pajamäki). Munkkiniemi +4.2%/v, Pajamäki +2.1%/v. Munkkiniemi kalliimpi mutta nopeampi kasvu."
+  - *Toteutus:* Shift+klikkaa postinumeroalueita kartalla → valitaan useita. Aukea vertailutaulukko tai rinnakkaiset viivakuviot.
 
 - **Naapurustohaku** (lähialueet)
-  - *Miksi:* Asunnon ostaja haluaa tietää, miten naapurialueet hinnoitellaan. Auttaa löytämään "piilohelmet" lähellä kalliita alueita.
-  - *Toteutus:* Klikkaa aluetta → korosta kaikki alueet 5 km säteellä. Näytä niiden keskihinnat ja trendit. Käytä Turf.js:ää lasketaan etäisyydet.
-  - *Esimerkki:* "00100 naapurustossa: 00160 (+3.8%/v), 00170 (+2.9%/v), 00180 (+4.1%/v)."
+  - *Miksi:* Auttaa löytämään "piilohelmet" lähellä kalliita alueita.
+  - *Toteutus:* Klikkaa aluetta → korosta kaikki alueet 5 km säteellä. Näytä niiden keskihinnat ja trendit.
 
 - **Klusterianalyysi** (samankaltaiset alueet)
-  - *Miksi:* Löydä alueita, jotka ovat samanlaisia hinnaltaan, trendiltään ja väestörakenteeltaan. "Missä muualla on samankaltainen kehitys kuin Kalliossa?"
-  - *Toteutus:* K-means clustering tai hierarkkinen klusterointi scikit-learn:llä. Klusteroi alueet 3-5 ryhmään (esim. "Nopeasti kasvavat kaupunkialueet", "Vakaat esikaupungit", "Laskevat syrjäalueet"). Väritä kartta klustereittain.
-  - *Esimerkki:* "Klusteri 1 (Nopeasti kasvavat): 00100, 00530, 02100 (Espoon keskus). Keskimääräinen kasvu +4.5%/v."
+  - *Miksi:* "Missä muualla on samankaltainen kehitys kuin Kalliossa?"
+  - *Toteutus:* K-means clustering scikit-learn:llä. Klusteroi alueet ryhmiin. Väritä kartta klustereittain.
 
 - **Benchmark-indeksi** (vertailu keskiarvoon)
   - *Miksi:* Näyttää, onko alue yli/ali keskiarvon. Helppo tapa arvioida alueen houkuttelevuutta.
-  - *Toteutus:* Laske pääkaupunkiseudun / koko Suomen keskihinta ja trendi. Näytä jokaiselle alueelle +/- % poikkeama. Esim. "00100: +78% yli PK-seudun keskiarvon (4150 €/m²)."
-  - *Esimerkki:* "00710 (Helsinki-Myllypuro): -12% alle PK-seudun keskiarvon. Edullinen alue pääkaupunkiseudulla."
-
-- **Peer group -analyysi** (vastaavat alueet)
-  - *Miksi:* Vertaa aluetta vastaavankokoisiin alueisiin väkiluvun, tulotason ja sijainnin perusteella. "Onko 00530 kallis verrattuna vastaaviin lähiöihin?"
-  - *Toteutus:* Suodata alueet, joilla ±20% väkiluku ja ±15% keskitulo. Vertaa hintatrendejä. Näytä tulosdiagrammina.
-  - *Esimerkki:* "00530 peer group (10 aluetta): Keskihinta 5200 €/m². 00530 on 8% kalliimpi kuin peer-ryhmän mediaani."
+  - *Toteutus:* Laske PK-seudun / koko Suomen keskihinta. Näytä +/- % poikkeama per alue.
 
 ### 4. Käyttöliittymäparannukset
 
-**Tavoite:** Parantaa käyttökokemusta, erityisesti mobiilissa, ja tehdä kartasta helpommin jaettava.
+**Tavoite:** Parantaa käyttökokemusta ja tehdä kartasta helpommin jaettava.
 
 **Ideat:**
 
-- **✅ Mobiilioptimeinti** (osittain toteutettu 4.3.2026)
+- **✅ Mobiilioptimeinti** (toteutettu 5.3.2026)
   - *Status:* ✅ Toteutettu
   - *Toteutettu:*
-    - CSS media queries (@media max-width: 768px) lisätty
-    - Pienempi otsikko ja tiiviimmät kontrollit mobiilissa
-    - Muutoskartan inputs piilossa oletuksena, näytetään vain kun muutoskartta valittu
-    - Fonttikoot ja välimatkat optimoitu kosketusnäytöille
-    - Animaation play/pause ja speed-kontrollit näkyvissä mobiilissakin
-  - *Vielä toteutettavana:*
-    - Hamburger-valikko
-    - Swipe-gesturet animaatioille
-    - Touch-optimoidut zoom-kontrollit
+    - Hamburger-valikko (☰) piilottaa kontrollit mobiilissa
+    - Stats-palkki kelluvana overlay:na kartan päällä
+    - Kompakti header (alaotsikot piilotettu mobiilissa)
+    - Kartta lähes koko näytön korkuinen (calc(100vh - 50px))
+    - Valikko sulkeutuu automaattisesti karttaa klikatessa
+    - Haku-kenttä piilotettu mobiilissa hamburger-painikkeen tieltä
 
 - **✅ Animaatioiden alasvetovalikko** (toteutettu 4.3.2026)
   - *Status:* ✅ Toteutettu
-  - *Muutos:* Radio-painikkeet → dropdown-valikko
-  - *Edut:* Säästää tilaa, helpompi käyttää kosketusnäytöllä
+
+- **Jakolinkit** (URL-parametrit) ⭐ Korkea prioriteetti
+  - *Miksi:* Käyttäjät haluavat jakaa tarkan näkymän. "Katso tätä aluetta!"
+  - *Toteutus:* URL query parameters: `?year=2025&zip=00100&type=0&metric=keskihinta_aritm_nw&zoom=13&lat=60.17&lng=24.94`. JavaScript lukee parametrit sivun latautuessa.
 
 - **Tumma tila** (dark mode)
   - *Miksi:* Vähentää silmien rasitusta hämärässä ja säästää energiaa OLED-näytöillä.
-  - *Toteutus:* CSS-muuttujat väreille. Toggle-nappi otsikossa. Kartta käyttää dark-themed tiles (esim. CartoDB Dark Matter). Local storage muistaa valinnan.
-  - *Esimerkki:* "Dark modessa tausta #1a1a1a, teksti #e0e0e0, polygonit tummemmat värit."
+  - *Toteutus:* CSS-muuttujat väreille. CartoDB Dark Matter tiles. Local storage muistaa valinnan.
 
 - **PDF/PNG-vienti** (kartan tallennus)
-  - *Miksi:* Käyttäjät haluavat jakaa karttanäkymiä raporteissa, esityksissä tai sosiaalisessa mediassa.
-  - *Toteutus:* Leaflet.EasyPrint plugin tai html2canvas-kirjasto. Nappi "Tallenna PNG". Ottaa screenshot kartasta + legendasta + otsikosta.
-  - *Esimerkki:* "Käyttäjä tallentaa 2025 yksiöiden hintakartan PNG:nä ja jakaa Twitterissä."
+  - *Miksi:* Karttanäkymien jakaminen raporteissa ja sosiaalisessa mediassa.
+  - *Toteutus:* html2canvas-kirjasto tai Leaflet.EasyPrint plugin.
 
 - **Suosikkialueet** (tallennus local storageen)
   - *Miksi:* Asunnon ostaja seuraa 3-5 kiinnostavaa aluetta. Nopea pääsy tallennettuihin alueisiin.
-  - *Toteutus:* Tähti-ikoni jokaisessa popup:ssa. Klikkaus tallentaa postinumeron `localStorage`:en. Sidebar listaa suosikit. Klikkaus zoomaa alueeseen.
-  - *Esimerkki:* "Käyttäjä tallentaa 00530, 00570, 00710. Palaa kartalle myöhemmin → valitsee '00530' suosikeista → kartta zoomaa sinne."
-
-- **Jakolinkit** (URL-parametrit)
-  - *Miksi:* Käyttäjät haluavat jakaa tarkan näkymän (vuosi, postinumero, mittari, zoom). "Katso tätä aluetta!"
-  - *Toteutus:* URL query parameters: `?year=2025&zip=00100&type=0&metric=keskihinta_aritm_nw&zoom=13&lat=60.17&lng=24.94`. JavaScript lukee parametrit sivun latautuessa ja asettaa oikean näkymän.
-  - *Esimerkki:* "Käyttäjä jakaa linkin `kartta.html?year=2025&zip=00100` → vastaanottaja näkee suoraan Helsingin keskustan hinnat 2025."
-
-- **Kieli-vaihtoehdot** (monikielisyys)
-  - *Miksi:* Englanninkielinen versio houkuttelee kansainvälisiä sijoittajia ja tutkijoita.
-  - *Toteutus:* Kaikki tekstit JSON-tiedostossa (`fi.json`, `en.json`). Toggle-nappi "FI | EN". JavaScript lataa oikean kielen. Muuttaa otsikot, labelit, legendat.
-  - *Esimerkki:* "EN-versio: 'Housing Price Map', 'Old Condominiums', 'Average price per m²'."
+  - *Toteutus:* Tähti-ikoni popup:ssa. LocalStorage tallentaa. Sidebar listaa suosikit.
 
 - **Palveluindeksin mukauttaminen**
-  - *Miksi:* Eri käyttäjät arvostavat eri palveluita. Lapsiperheelle päiväkodit tärkeitä, eläkeläiselle kaupat ja terveysasemat.
-  - *Toteutus:* Liukusäätimet (sliders) jokaiselle palvelukategorialle (kaupat, koulut, päiväkodit...). Käyttäjä asettaa painotukset (yhteensä 100%). Palveluindeksi lasketaan uudelleen dynaamisesti. Kartta päivittyy.
-  - *Esimerkki:* "Lapsiperhe: Koulut 40%, Päiväkodit 40%, Kaupat 20%. Eläkeläinen: Kaupat 50%, Terveysasemat 30%, Julkinen liikenne 20%. Kartta näyttää eri alueet korostuneina."
+  - *Miksi:* Eri käyttäjät arvostavat eri palveluita. Lapsiperheelle päiväkodit tärkeitä, eläkeläiselle kaupat.
+  - *Toteutus:* Liukusäätimet jokaiselle palvelukategorialle. Palveluindeksi lasketaan uudelleen dynaamisesti.
 
 ### 5. Lisädatan integrointi
 
@@ -396,63 +435,163 @@ Kartta päivittyy automaattisesti ilman manuaalista työtä:
 
 **Ideat:**
 
-- **Liikennedata** (matka-aika keskustaan)
-  - *Miksi:* Matka-aika työpaikalle on tärkein tekijä asunnon valinnassa. Alueet, joista pääsee nopeasti keskustaan, ovat kalliimpia.
-  - *Toteutus:* HSL Reittiopas API (pääkaupunkiseutu) tai Google Maps Distance Matrix API (maksullinen). Laske matka-aika alueelta Helsingin rautatieasemalle aamu-ruuhkassa (klo 8). Tallenna `liikennedata.json`.
-  - *Esimerkki:* "00100: 0 min. 00710: 18 min julkisilla (metro). 01450: 52 min julkisilla."
-  - *Haaste:* Google API on maksullinen (0.005€/haku, 1723 aluetta = 8.6€). HSL API toimii vain PK-seudulla.
-
-- **✅ Palvelutiedot** (kaupat, koulut, päiväkodit, liikuntapaikat, terveysasemat, julkinen liikenne)
-  - *Status:* ✅ Toteutettu (4.3.2026)
+- **✅ Palvelutiedot** (toteutettu 4.3.2026)
+  - *Status:* ✅ Toteutettu
   - *Ratkaisu:* Geofabrik OSM data + paikallinen parsing (osmium-kirjasto)
-  - *Toteutettu:*
-    - Ladataan finland-latest.osm.pbf (~676 MB) Geofabrikista
-    - Parsitaan osmium-kirjastolla (1.7M+ nodea)
-    - Point-in-polygon tarkistus shapely:llä (ei enää 1 km säde, vaan tarkat postinumeroaluerajat)
-    - 6 palvelukategoriaa: kaupat, koulut, päiväkodit, liikuntapaikat, terveysasemat, julkinen liikenne
-    - Painotettu palveluindeksi (kaupat 30%, julkinen liikenne 25%, koulut 15%, päiväkodit 15%, liikuntapaikat 10%, terveysasemat 5%)
-    - Näkyy popup-ikkunoissa emojeilla 🛒🏫🧒💪🏥🚌
-  - *Kattavuus:* 1134/1723 postinumeroalueella (66%)
-  - *Haasteet:* 
-    - Ei aikasarjaa (vain nykyhetken snapshot)
-    - Vanhemmat alueet ja syrjäseudut usein ilman OSM-dataa
-    - OSM-datan laatu vaihtelee alueittain
-  - *Vaihtoehdot historialliseen dataan:*
-    - Geofabrik arkisto (historialliset snapshotit eri vuosilta)
-    - OSM Full History dump (erittäin suuri tiedosto)
-  - **⚠️ Aikaisemmat haasteet Overpass API:n kanssa (ratkaistu):**
-    - Overpass API rate limiting: 0/10 onnistunutta hakua
-    - Ratkaistu vaihtamalla Geofabrik-ratkaisuun (lokaalir parsing)
+  - *Kattavuus:* 1711/3044 postinumeroalueella (56%)
+  - *Kategoriat:* kaupat, koulut, päiväkodit, liikuntapaikat, terveysasemat, julkinen liikenne
+
+- **Liikennedata** (matka-aika keskustaan)
+  - *Miksi:* Matka-aika työpaikalle on tärkein tekijä asunnon valinnassa.
+  - *Toteutus:* Digitransit API (PK-seutu, ilmainen). Laske matka-aika alueelta Helsingin rautatieasemalle.
+  - *Haaste:* Digitransit API kattaa vain PK-seudun ja suurimmat kaupungit.
 
 - **Uudiskohteet** (rakenteilla olevat asunnot)
-  - *Miksi:* Isot rakennusprojektit voivat vaikuttaa alueen hintoihin (lisää tarjontaa → hinnat laskevat, tai parantaa alueen imagoa → hinnat nousevat).
-  - *Toteutus:* Rakennetun ympäristön tietojärjestelmä (RYTJ) tai YIT/Bonava/SRV -rakennusyhtiöiden avoimet kohteet. Merkitse kartalle rakennusprojektit pisteinä.
-  - *Esimerkki:* "00100: 3 uudiskohdetta rakenteilla (yhteensä 420 asuntoa). Valmistuu 2025-2027."
+  - *Miksi:* Isot rakennusprojektit voivat vaikuttaa alueen hintoihin.
+  - *Toteutus:* Rakennetun ympäristön tietojärjestelmä (RYTJ). Merkitse kartalle rakennusprojektit.
 
 - **Kiinteistöverotiedot**
-  - *Miksi:* Kiinteistöverokannat vaihtelevat kunnittain (0.93-2.0%). Korkea kiinteistövero voi alentaa asuntojen kysyntää.
-  - *Toteutus:* Hae kunnat, joihin postinumeroalueet kuuluvat. Scrape kuntien veroprosentit verohallinnon sivuilta tai käytä Kuntaliiton dataa. Tallenna `verotiedot.json`.
-  - *Esimerkki:* "00100 (Helsinki): Kiinteistövero 1.0%. 02100 (Espoo): 0.93%. Edullisuusetu Espoossa."
-
-- **Energiatehokkuus** (rakennuskannan energialuokat)
-  - *Miksi:* Vanhemmat rakennukset (E-G luokat) ovat kalliimpia ylläpitää. Uudet energiatehokkaat (A-B) ovat kysyttyjä.
-  - *Haaste:* Energiatodistukset ovat kiinteistökohtaisia, ei postinumeroaluekohtaisia. Tarvitaan aggregointi. Motivan energiatodistusrekisteri?
-  - *Toteutus:* Jos data saatavilla, laske postinumeroalueen keskimääräinen energialuokka painotettuna asuntojen määrällä.
-  - *Esimerkki:* "00100: Keskimääräinen energialuokka C (vanha rakennuskanta). Energiakustannus ~1800€/v."
+  - *Miksi:* Kiinteistöverokannat vaihtelevat kunnittain (0.93-2.0%).
+  - *Toteutus:* Hae kunnat, joihin postinumeroalueet kuuluvat. Kuntaliiton data verokannoista.
 
 - **Ilmanlaatu ja melu** (ympäristötekijät)
-  - *Miksi:* Hyvä ilmanlaatu ja alhainen melutaso nostavat asuntojen arvoa. Vilkkaat tiet ja teollisuusalueet laskevat.
-  - *Toteutus:* HSY (Helsingin seudun ympäristöpalvelut) ilmanlaatu-API. Tulliluodon melumalli (Helsingin kaupunki). Tallenna keskimääräiset PM2.5-pitoisuudet ja dB-tasot postinumeroalueittain.
-  - *Esimerkki:* "00100: PM2.5 keskiarvo 6.2 µg/m³ (hyvä). Melutaso 65 dB (kohtalainen, vilkas liikenne). 00570: PM2.5 5.1 µg/m³, 54 dB (hiljainen)."
+  - *Miksi:* Hyvä ilmanlaatu ja alhainen melutaso nostavat asuntojen arvoa.
+  - *Toteutus:* HSY ilmanlaatu-API (PK-seutu). PM2.5-pitoisuudet ja dB-tasot postinumeroalueittain.
 
-- **Historiallinen palveludata** (palveluiden kehityksen seuranta)
-  - *Miksi:* Nähdä miten palvelut ovat kehittyneet alueilla ajan myötä. Onko alueelle tullut lisää kauppoja? Onko koulu suljettu?
-  - *Toteutus:* Lataa Geofabrik arkistosta historiallisia OSM-snapshoteja (esim. 2015, 2017, 2019, 2021, 2023, 2025). Parse jokaiselle vuodelle palvelutiedot samalla tavalla. Tallenna aikasarjana.
-  - *Haaste:* ~3-5 GB per snapshot-vuosi. Yhteensä ~20-30 GB dataa 6 vuodelle. Parsing kestää ~30-60 min kaikille vuosille.
-  - *Hyöty:* Palvelutiedot voisi integroida 5v trendianalyysiin. Tutkia korrelaatiota palveluiden lisääntymisen ja hintojen nousun välillä.
-  - *Esimerkki:* "00100: Kauppoja lisääntynyt 18→24 (2015-2025). Metro-asemia +2. Palveluindeksi kasvanut 65→78. Samaan aikana hinnat nousseet +42%."
+### 6. Uudet analyysityökalut
+
+**Tavoite:** Tarjota käyttäjille syvempää analyysiä ja henkilökohtaisia suosituksia.
+
+**Ideat:**
+
+- **Postinumeroalueen profiilisivu** ⭐ Korkea prioriteetti
+  - *Miksi:* Kaikki tieto yhdestä alueesta yhdessä paikassa: aikasarjakaavio, väestötiedot, palvelut, naapurialueet, ennuste.
+  - *Toteutus:* Klikkaa aluetta → avautuu koko näytön modal. Chart.js viivakaaviolle, taulukot tiedoille.
+  - *Esimerkki:* "00100 Helsinki: Hinnat, väestö, palvelut, 5v trendi, ennuste — kaikki yhdellä sivulla."
+
+- **"Paras alue minulle" -hakutyökalu** ✅ Toteutettu
+  - *Miksi:* Asunnon ostaja tietää budjettinsa ja tarpeensa, mutta ei tunne kaikkia alueita.
+  - *Toteutus:* Suodatinpaneeli oikeassa reunassa: kuntavalinta (293 kuntaa), huoneistotyyppivalinta, max neliöhinta (liukusäädin), min väkiluku, palveluvaatimukset (kaupat, koulut, päiväkodit, liikunta, terveys, julk.liikenne), min palveluindeksi. Tulokset korostetaan kartalla vihreällä ja listataan paneelissa palveluindeksin mukaan. Klikkaus zoomaa alueelle.
+  - *Nappi:* "🔍 Paras alue" -painike kartan vasemmassa alareunassa.
+
+- **Hinta/tulot -suhdekartta** (asumisen kohtuuhintaisuus) ✅ Toteutettu
+  - *Miksi:* Absoluuttinen hinta ei kerro kaikkea. Affordable-indeksi (vuosipalkat per asunto) on informatiivisempi.
+  - *Toteutus:* Uusi mittari dropdown-valikossa: `keskihinta × 60m² / keskitulot`. Värikartta suhdeluvun mukaan (vihreä < 5 v, punainen > 12 v). Popup näyttää 60m² hinnan, keskitulon ja suhteen vuosissa.
+  - *Esimerkki:* "00100: 11.2 vuoden palkat. 90100 (Oulu): 4.8 vuoden palkat."
+
+- **Vuokra vs. osto -vertailu**
+  - *Miksi:* Vuokratuotto-% on sijoittajan tärkein mittari. Missä vuokraus on kannattavampaa kuin ostaminen?
+  - *Toteutus:* Jos vuokradata saatavissa (Tilastokeskus tai Vuokraovi), laske gross yield = vuosivuokra / ostohinta.
+  - *Haaste:* Vuokradatan saatavuus postinumeroalueittain.
+
+- **Inflaatiokorjatut hinnat**
+  - *Miksi:* 2009 ja 2025 hinnat eivät ole vertailukelpoisia nimellisarvoina. Reaalihinnat kertovat todellisen kehityksen.
+  - *Toteutus:* Hae kuluttajahintaindeksi Tilastokeskuksesta. Deflatoi kaikki hinnat vuoden 2025 euroiksi. Uusi toggle "Nimellinen / Reaalinen".
+
+- **Top 10 -listat** ✅ Toteutettu
+  - *Miksi:* Nopea yleiskatsaus kiinnostaviin alueisiin ilman koko kartan selaamista.
+  - *Toteutus:* Sivupaneeli vasemmalla: 6 listatyöppä (Kalleimmat, Halvimmat, Eniten nousseet 5v, Eniten laskeneet 5v, Paras vuokratuotto, Parhaat palvelut). Klikkaus zoomaa alueelle ja avaa popupin.
+  - *Nappi:* "🏆 Top 10" -painike kartan vasemmassa alareunassa.
+
+- **Service Worker + offline-tuki** (PWA)
+  - *Miksi:* Kartta toimisi ilman nettiä latauksen jälkeen. Hyödyllinen esim. asuntonäytöillä.
+  - *Toteutus:* Progressive Web App manifest + Service Worker cachettaa karttadatan ja tiilet.
+
+- **Rakennusvuositieto**
+  - *Miksi:* Alueen keskimääräinen rakennusvuosi kertoo paljon rakennuskannan laadusta ja remonttitarpeesta.
+  - *Toteutus:* Tilastokeskuksen rakennuskanta-data. Laske keskimääräinen rakennusvuosi postinumeroalueittain.
 
 **Osallistu kehitykseen!** Ehdotuksia ja pull requestejä otetaan vastaan mielellään.
+
+---
+
+## Kirjallisuuskatsaus: Asuntojen ja vuokrien hintoja selittävät tekijät
+
+Asuntomarkkinoiden hinnanmuodostus on laajasti tutkittu aihe taloustieteessä. Alla on kooste keskeisistä tutkimuksista ja teorioista, jotka selittävät asuntojen osto- ja vuokrahintojen vaihtelua.
+
+### 1. Sijainti ja saavutettavuus
+
+Asuntomarkkinoiden perusteorian mukaan sijainti on tärkein yksittäinen hintaselittäjä.
+
+- **Alonso-Muth-Mills -malli** (Alonso, 1964; Muth, 1969; Mills, 1972): Monosentrinen kaupunkimalli, jossa asuntojen hinnat laskevat etäisyyden kasvaessa keskustasta. Asukkaiden on valittava halvemman asumisen ja pidempien matka-aikojen välillä (*bid-rent curve*).
+- **Debrezion, Pels & Rietveld (2007)**: Meta-analyysi 57 tutkimuksesta osoitti, että joukkoliikenneasemien läheisyys nostaa asuntojen hintoja keskimäärin 2–4 % (rautatieasema) ja 1–2 % (bussipysäkki) alueesta riippuen.
+- **Laakso (1997)**: Suomessa saavutettavuus Helsingin keskusta-alueelle on merkittävin yksittäinen hintaselittäjä pääkaupunkiseudulla. 10 min lyhyempi matka-aika nostaa neliöhintaa n. 5–8 %.
+
+### 2. Hedoninen hinnoittelu — asunnon ja alueen ominaisuudet
+
+- **Rosen (1974)**: *Hedonic pricing* -teoria, jonka mukaan asunnon hinta muodostuu osiensa summana: sijainti, koko, kunto, kerros, rakennusvuosi, piha, parveke jne. Jokainen ominaisuus antaa marginaalisen lisäarvon.
+- **Sirmans, Macpherson & Zietz (2005)**: Kattava meta-analyysi hedonisista hintatutkimuksista. Merkittävimmät selittäjät: pinta-ala (+), huoneiden lukumäärä (+), ikä (−), kunto (+), autotalli (+), uima-allas (+), ilmastointi (+). Huoneiston koko selittää tyypillisesti 30–50 % hinnan vaihtelusta.
+- **Oikarinen (2015)**: Suomessa asunnon ikä, kunto ja kerros vaikuttavat merkittävästi. Uudiskohde vs. 1970-luvun talo: hintaero jopa 20–35 % samalla sijainnilla.
+
+### 3. Makrotaloudelliset tekijät
+
+#### 3.1 Korot ja rahapolitiikka
+- **Himmelberg, Mayer & Sinai (2005)**: Korot ovat asuntohintojen tärkein makrotason selittäjä. 1 %-yksikön koronnousu laskee hintoja n. 5–10 % pitkällä aikavälillä.
+- **Oikarinen (2009)**: Suomessa 12 kk euriborin muutokset selittävät merkittävän osan lyhyen aikavälin hintavaihteluista. Matala korkotaso 2010-luvulla selittää hintojen nousua erityisesti kasvukeskuksissa.
+
+#### 3.2 Tulot ja työllisyys
+- **Holly & Jones (1997)**: Reaalipalkat ja asuntohinnat ovat pitkän aikavälin yhteisintegroituneita — tulokehitys on hintojen fundamentaali perusta.
+- **Mankiw & Weil (1989)**: Työikäisen väestön (25–44 v) määrä ennustaa asuntokysyntää. Suuren ikäluokan perheenperustamisvaihe nosti hintoja 1970–90-luvuilla.
+- **Laakso & Loikkanen (2004)**: Suomessa tulotaso selittää kaupunkien välisiä hintaeroja parhaiten. Helsinki–Oulu -hintaero selittyy pitkälti tulotasoerolla.
+
+#### 3.3 Inflaatio ja rakennuskustannukset
+- **Glaeser & Gyourko (2005)**: Rakennuskustannukset asettavat alarajan asuntohinnoille. Kalliilla alueilla hintaero rakennuskustannuksiin nähden selittyy maan hinnalla ja sääntelyllä. Esim. Manhattanilla rakennuskustannus on vain 50 % myyntihinnasta.
+
+### 4. Tarjonta ja sääntely
+
+- **Saiz (2010)**: Maankäytön sääntely ja maantieteelliset rajoitteet (meri, järvet, jyrkät rinteet) rajoittavat tarjontaa ja nostavat hintoja. Tarjontajousto on tärkein yksittäinen tekijä joka erottaa korkean ja matalan hintakasvun kaupungit.
+- **Glaeser, Gyourko & Saks (2005)**: Tiukka kaavoitus nostaa asuntojen hintoja 20–50 % verrattuna vapaan kaavoituksen alueisiin. Pelkkä maapolitiikka selittää merkittävän osan Kalifornian ja Teksasin hintaerosta.
+- **Oikarinen, Peltola & Valtonen (2015)**: Suomessa kaavoitusprosessin hitaus rajoittaa asuntotuotantoa erityisesti pääkaupunkiseudulla. Tonttimaan niukkuus Helsingissä nostaa hintoja.
+
+### 5. Väestörakenne ja muuttoliike
+
+- **Tervo (2000)**: Suomen sisäinen muuttoliike suuntautuu kasvukeskuksiin, mikä nostaa hintoja kohdealueilla ja laskee lähtöalueilla. 1990-luvun muuttoliike selittää hintojen eriytymistä maakuntien välillä.
+- **Aro (2007)**: Kaupungistuminen ja erityisesti nuorten ikäluokkien muutto yliopisto- ja kasvukaupunkeihin ajaa hintakehitystä. Muuttotappiokunnissa hinnat laskevat tai stagnoivat.
+- **Eurostat (2020)**: EU-tasolla väestönkasvu on merkittävin pitkän aikavälin asuntohintojen selittäjä. 1 % väestönlisäys → 1,5–2 % hinnannousu.
+
+### 6. Palvelut ja alueen vetovoimatekijät
+
+- **Black (1999)**: Koulun laatu nostaa asuntojen hintoja. Yhdysvalloissa koulupiirin rajan ylittäminen parempaan koulupiiriin nostaa hintoja 2–5 %. Vaikutus todettu myös mm. Isossa-Britanniassa (Gibbons & Machin, 2003) ja Suomessa (Harjunen ym., 2018).
+- **Gibbons (2004)**: Rikollisuus laskee hintoja. 10 % vähemmän rikoksia → 1–3 % korkeammat hinnat.
+- **Pope & Pope (2015)**: Ravintoloiden, kahviloiden ja kauppojen läheisyys nostaa hintoja. "Walkability" (käveltävyys) on viime vuosina korostunut hintaselittäjänä.
+- **Votsis & Perrels (2016)**: Suomessa viheralueiden läheisyys nostaa hintoja erityisesti kaupunkialueilla 3–5 %.
+
+### 7. Vuokrien erityistekijät
+
+Vuokramarkkinat noudattavat pääosin samoja hintatekijöitä kuin omistusasuntomarkkinat, mutta joitakin eroja on:
+
+- **DiPasquale & Wheaton (1996)**: *Four-quadrant model* — vuokrat määräytyvät ensisijaisesti kysynnän (tulot, väestö, työllisyys) ja tarjonnan (rakennuskanta) tasapainosta. Omistushinnat reagoivat lisäksi korkoihin ja tuotto-odotuksiin.
+- **Arnott (1987)**: Vuokrien sopeutuminen on hitaampaa kuin omistushintojen, koska vuokrasopimukset ovat kiinteitä (tyypillisesti 1 vuosi). Uudet vuokrasopimukset reagoivat nopeammin markkinamuutoksiin kuin uusittavat.
+- **Eerola & Saarimaa (2018)**: Suomessa ARA-vuokra-asunnot ja vapaarahoitteiset vuokra-asunnot muodostavat erilliset segmentit. Vuokrasääntely vaikuttaa tarjontaan.
+- **Brännback & Oikarinen (2019)**: Suomessa vuokrien ja omistushintojen suhde (P/R-ratio) vaihtelee merkittävästi: Helsinki ~25–30, muut kasvukeskukset ~15–20, maaseutu ~10–12. Korkea suhdeluku indikoi spekulatiivista kysyntää tai matalia korkoja.
+
+### 8. Yhteenveto: Hintaselittäjien hierarkia
+
+Tutkimuskirjallisuuden perusteella asuntojen ja vuokrien hintoja selittävät tekijät voidaan ryhmitellä vaikuttavuusjärjestykseen:
+
+| Sija | Tekijä | Selitysvoima | Keskeinen lähde |
+|------|--------|-------------|-----------------|
+| 1 | **Sijainti ja saavutettavuus** | Erittäin suuri | Alonso (1964), Laakso (1997) |
+| 2 | **Alueen tulotaso ja työllisyys** | Suuri | Holly & Jones (1997) |
+| 3 | **Korkoympäristö** | Suuri (syklinen) | Himmelberg ym. (2005) |
+| 4 | **Asunnon ominaisuudet** (koko, ikä, kunto) | Suuri | Rosen (1974), Sirmans ym. (2005) |
+| 5 | **Tarjontarajoitteet ja kaavoitus** | Merkittävä | Saiz (2010), Glaeser ym. (2005) |
+| 6 | **Väestönkasvu ja muuttoliike** | Merkittävä | Tervo (2000), Mankiw & Weil (1989) |
+| 7 | **Palvelut** (koulut, liikenne, kaupat) | Kohtalainen | Black (1999), Pope & Pope (2015) |
+| 8 | **Ympäristötekijät** (viheralueet, melu, rikollisuus) | Kohtalainen | Gibbons (2004), Votsis (2016) |
+| 9 | **Spekulaatio ja odotukset** | Syklinen | Case & Shiller (1989) |
+
+### Relevanssi tälle projektille
+
+Tässä hintakarttaprojektissa mitataan useita näistä tekijöistä:
+- ✅ **Sijainti** — postinumeroalueet, kaupunkinavigointi
+- ✅ **Tulotaso** — Paavo-tietokannan keskitulot, hinta/tulot-suhde
+- ✅ **Väestö** — väkiluku, keski-ikä, muuttoliike (väestönmuutos-%)
+- ✅ **Palvelut** — 6 kategoriaa OSM-datasta, palveluindeksi (tiheys/km², log-skaalaus)
+- ✅ **Työllisyys** — työttömyysaste Paavosta
+- ⬜ **Asunnon ominaisuudet** — ei saatavilla aggregaattitasolla
+- ⬜ **Korkoympäristö** — yhteinen kaikille alueille, ei alueellista vaihtelua
+- ⬜ **Kaavoitus ja tarjonta** — ei dataa saatavilla
 
 ## Lähdeviitteet
 

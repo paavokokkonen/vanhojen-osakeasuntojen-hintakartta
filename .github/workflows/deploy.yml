@@ -52,6 +52,9 @@ jobs:
     - name: Laske ennusteet
       run: python laske_ennusteet.py
     
+    - name: Hae vuokradata
+      run: python lataa_vuokrat.py
+    
     - name: Luo interaktiivinen kartta
       run: python kartta_polygon.py
     

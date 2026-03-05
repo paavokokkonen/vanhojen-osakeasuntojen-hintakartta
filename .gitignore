@@ -24,9 +24,15 @@ kartta.html
 testi_*.py
 testi_*.html
 tarkista_*.py
+test_*.py
+temp_*.py
 *.bak
 *.backup
-output.txttemp_output.txt
+output.txt
+temp_output.txt
+*_output.txt
+*_final.txt
+test_run.txt
 
 # OSM-datatiedostot (isot, ladataan ajossa)
 *.osm.pbf

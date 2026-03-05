@@ -51,6 +51,17 @@ except FileNotFoundError:
     ennusteet_mallit = {}
     print("  Ennustemallit: Ei saatavilla (aja: python laske_ennusteet.py)")
 
+# Lataa vuokradata (Tilastokeskus 13eb)
+try:
+    with open('data/vuokradata.json', 'r', encoding='utf-8') as f:
+        vuokradata = json.load(f)
+    vuokra_years = vuokradata['metadata']['years']
+    vuokra_postcodes = len(vuokradata['data'])
+    print(f"  Vuokradata: {vuokra_postcodes} aluetta, {vuokra_years[0]}-{vuokra_years[-1]}")
+except FileNotFoundError:
+    vuokradata = {'data': {}}
+    print("  Vuokradata: Ei saatavilla (aja: python lataa_vuokrat.py)")
+
 # Hae metatiedot
 available_years = sorted(data['metadata']['years'])
 building_types = data['metadata']['building_types']
@@ -91,6 +102,12 @@ for feature in geojson_data['features']:
         # Lisää palvelutiedot jos saatavilla
         palvelut = rikastettu_data[postcode].get('palvelut', {})
         feature['properties']['palvelut'] = palvelut if palvelut else {}
+    
+    # Lisää vuokradata jos saatavilla
+    if postcode in vuokradata.get('data', {}):
+        feature['properties']['vuokra'] = vuokradata['data'][postcode]
+    else:
+        feature['properties']['vuokra'] = {}
 
 # Luo JavaScript-muuttujat
 years_json = json.dumps(available_years)
@@ -110,6 +127,16 @@ avg_price = int(sum(default_prices) / len(default_prices)) if default_prices els
 max_price = int(max(default_prices)) if default_prices else 0
 min_price = int(min(default_prices)) if default_prices else 0
 
+# Kerää kuntalista hakutyökalua varten
+kunnat_set = set()
+for feature in geojson_data['features']:
+    city_name = feature['properties'].get('city', '')
+    if city_name:
+        kunnat_set.add(city_name)
+kunnat_sorted = sorted(kunnat_set)
+kunnat_options = chr(10).join(f'                <option value="{k}">{k}</option>' for k in kunnat_sorted)
+kunnat_json = json.dumps(kunnat_sorted)
+
 html = f'''<!DOCTYPE html>
 <html lang="fi">
 <head>
@@ -117,6 +144,7 @@ html = f'''<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Asuntojen hintakartta 2009-{latest_year}</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }}
@@ -126,10 +154,33 @@ html = f'''<!DOCTYPE html>
             color: white;
             padding: 20px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            position: relative;
         }}
         #header h1 {{ font-size: 24px; margin-bottom: 5px; }}
         #header p {{ opacity: 0.8; font-size: 14px; }}
         #header .forecast-note {{ opacity: 0.7; font-size: 12px; font-style: italic; margin-top: 5px; }}
+        
+        #mobile-menu-toggle {{
+            display: none;
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            z-index: 1001;
+            background: rgba(255,255,255,0.2);
+            border: 2px solid white;
+            color: white;
+            font-size: 24px;
+            width: 40px;
+            height: 40px;
+            border-radius: 6px;
+            cursor: pointer;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s;
+        }}
+        #mobile-menu-toggle:active {{
+            background: rgba(255,255,255,0.3);
+        }}
         
         #controls {{
             background: #2a5298;
@@ -236,22 +287,35 @@ html = f'''<!DOCTYPE html>
         /* Mobiili */
         @media (max-width: 768px) {{
             #header {{
-                padding: 12px 15px;
+                padding: 10px 15px;
             }}
             #header h1 {{
-                font-size: 18px;
-                margin-bottom: 3px;
+                font-size: 16px;
+                margin-bottom: 0;
+                padding-right: 50px;
             }}
             #header p {{
-                font-size: 12px;
+                display: none;
             }}
             #header .forecast-note {{
-                font-size: 10px;
+                display: none;
+            }}
+            
+            #mobile-menu-toggle {{
+                display: flex;
             }}
             
             #controls {{
+                display: none;
                 padding: 10px 15px;
                 gap: 10px;
+                max-height: 0;
+                overflow: hidden;
+                transition: max-height 0.3s ease-out;
+            }}
+            #controls.mobile-menu-open {{
+                display: flex;
+                max-height: 500px;
             }}
             #controls .control-group {{
                 flex-basis: 100%;
@@ -267,36 +331,42 @@ html = f'''<!DOCTYPE html>
             }}
             
             #stats {{
-                padding: 10px 15px;
-                gap: 10px;
+                position: absolute;
+                top: 50px;
+                left: 0;
+                right: 0;
+                z-index: 999;
+                padding: 8px 10px;
+                gap: 8px;
+                background: rgba(255, 255, 255, 0.95);
+                box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+                transition: opacity 0.3s;
+            }}
+            #controls.mobile-menu-open ~ #stats {{
+                opacity: 0;
+                pointer-events: none;
             }}
             .stat-box {{
-                padding: 8px 12px;
+                padding: 6px 10px;
                 flex: 1;
-                min-width: 80px;
+                min-width: 70px;
             }}
             .stat-box .label {{
-                font-size: 10px;
+                font-size: 9px;
             }}
             .stat-box .value {{
-                font-size: 16px;
+                font-size: 14px;
             }}
             
             #map {{
-                height: calc(100vh - 320px);
+                height: calc(100vh - 50px);
             }}
             
             .city-buttons {{
-                display: none; /* Piilota pienillä näytöillä */
+                display: none;
             }}
             #search-box {{
-                top: 10px;
-                right: 10px;
-                left: auto;
-            }}
-            #search-box input {{
-                width: 150px;
-                font-size: 13px;
+                display: none;
             }}
             
             .popup-content {{
@@ -308,14 +378,375 @@ html = f'''<!DOCTYPE html>
             .popup-content .price {{
                 font-size: 20px;
             }}
+            #timeseries-panel {{
+                width: 100%;
+            }}
         }}
+        
+        /* Aikasarjakaavio-modal */
+        #timeseries-modal {{
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 2000;
+            background: rgba(0,0,0,0.5);
+        }}
+        #timeseries-panel {{
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 650px;
+            height: 100%;
+            background: white;
+            overflow-y: auto;
+            box-shadow: -4px 0 20px rgba(0,0,0,0.3);
+            padding: 25px;
+            animation: slideIn 0.3s ease-out;
+        }}
+        @keyframes slideIn {{
+            from {{ transform: translateX(100%); }}
+            to {{ transform: translateX(0); }}
+        }}
+        #timeseries-panel .ts-close-btn {{
+            position: sticky;
+            top: 0;
+            float: right;
+            font-size: 28px;
+            cursor: pointer;
+            color: #666;
+            z-index: 10;
+            background: white;
+            border: none;
+            padding: 0 5px;
+            line-height: 1;
+        }}
+        #timeseries-panel .ts-close-btn:hover {{
+            color: #333;
+        }}
+        #timeseries-panel h2 {{
+            color: #1e3c72;
+            margin-bottom: 5px;
+            font-size: 22px;
+        }}
+        #timeseries-panel .ts-area-name {{
+            color: #666;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }}
+        .ts-chart-section {{
+            margin-bottom: 30px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #eee;
+        }}
+        .ts-chart-section:last-child {{
+            border-bottom: none;
+        }}
+        .ts-chart-section h3 {{
+            color: #2a5298;
+            margin-bottom: 10px;
+            font-size: 15px;
+        }}
+        .ts-chart-section canvas {{
+            max-height: 280px;
+        }}
+        .ts-btn {{
+            background: #1e3c72;
+            color: white;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-top: 10px;
+            display: block;
+            width: 100%;
+        }}
+        .ts-btn:hover {{
+            background: #2a5298;
+        }}
+        
+        /* Top 10 -paneeli */
+        #top10-toggle {{
+            position: absolute;
+            bottom: 30px;
+            left: 10px;
+            z-index: 1000;
+            background: white;
+            border: 2px solid #1e3c72;
+            color: #1e3c72;
+            font-weight: bold;
+            padding: 8px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            font-size: 13px;
+        }}
+        #top10-toggle:hover {{ background: #f0f4ff; }}
+        #top10-panel {{
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 370px;
+            height: 100%;
+            background: white;
+            z-index: 1500;
+            box-shadow: 4px 0 20px rgba(0,0,0,0.3);
+            overflow-y: auto;
+            animation: top10SlideIn 0.3s ease-out;
+        }}
+        @keyframes top10SlideIn {{
+            from {{ transform: translateX(-100%); }}
+            to {{ transform: translateX(0); }}
+        }}
+        #top10-panel .top10-header {{
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }}
+        #top10-panel .top10-header h2 {{ font-size: 18px; margin: 0; }}
+        #top10-panel .top10-close {{
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+        }}
+        .top10-tabs {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            padding: 10px 15px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #ddd;
+            position: sticky;
+            top: 52px;
+            z-index: 9;
+        }}
+        .top10-tab {{
+            padding: 5px 10px;
+            border: 1px solid #ddd;
+            border-radius: 15px;
+            background: white;
+            cursor: pointer;
+            font-size: 11px;
+            white-space: nowrap;
+        }}
+        .top10-tab.active {{
+            background: #1e3c72;
+            color: white;
+            border-color: #1e3c72;
+        }}
+        .top10-list {{
+            padding: 10px 15px;
+        }}
+        .top10-item {{
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: background 0.2s;
+        }}
+        .top10-item:hover {{ background: #f0f4ff; }}
+        .top10-rank {{
+            font-weight: bold;
+            color: #1e3c72;
+            width: 30px;
+            font-size: 16px;
+        }}
+        .top10-info {{ flex: 1; }}
+        .top10-info .top10-zip {{ font-weight: bold; color: #333; font-size: 14px; }}
+        .top10-info .top10-name {{ font-size: 11px; color: #888; }}
+        .top10-value {{
+            text-align: right;
+            font-weight: bold;
+            font-size: 14px;
+        }}
+        @media (max-width: 768px) {{
+            #top10-panel {{ width: 100%; }}
+            #top10-toggle {{ bottom: 15px; left: 5px; padding: 6px 10px; font-size: 12px; }}
+            #finder-toggle {{ bottom: 15px; left: 95px; padding: 6px 10px; font-size: 12px; }}
+            #finder-panel {{ width: 100%; }}
+        }}
+        
+        /* Paras alue -hakutyökalu */
+        #finder-toggle {{
+            position: absolute;
+            bottom: 30px;
+            left: 120px;
+            z-index: 1000;
+            background: white;
+            border: 2px solid #27ae60;
+            color: #27ae60;
+            font-weight: bold;
+            padding: 8px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            font-size: 13px;
+        }}
+        #finder-toggle:hover {{ background: #f0fff4; }}
+        #finder-panel {{
+            display: none;
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 380px;
+            height: 100%;
+            background: white;
+            z-index: 1500;
+            box-shadow: -4px 0 20px rgba(0,0,0,0.3);
+            overflow-y: auto;
+            animation: finderSlideIn 0.3s ease-out;
+        }}
+        @keyframes finderSlideIn {{
+            from {{ transform: translateX(100%); }}
+            to {{ transform: translateX(0); }}
+        }}
+        .finder-header {{
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }}
+        .finder-header h2 {{ font-size: 18px; margin: 0; }}
+        .finder-close {{
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+        }}
+        .finder-form {{
+            padding: 15px;
+        }}
+        .finder-group {{
+            margin-bottom: 14px;
+        }}
+        .finder-group label {{
+            display: block;
+            font-weight: bold;
+            font-size: 13px;
+            color: #333;
+            margin-bottom: 5px;
+        }}
+        .finder-group select,
+        .finder-group input[type="range"] {{
+            width: 100%;
+        }}
+        .finder-group select {{
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 13px;
+        }}
+        .finder-range-value {{
+            text-align: center;
+            font-weight: bold;
+            color: #27ae60;
+            font-size: 15px;
+            margin-top: 3px;
+        }}
+        .finder-checks {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }}
+        .finder-check {{
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 12px;
+            background: #f8f9fa;
+            padding: 4px 8px;
+            border-radius: 12px;
+            border: 1px solid #ddd;
+        }}
+        .finder-check input {{ margin: 0; }}
+        .finder-btn {{
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            width: 100%;
+            margin-top: 5px;
+        }}
+        .finder-btn:hover {{ opacity: 0.9; }}
+        .finder-reset {{
+            background: #f8f9fa;
+            color: #666;
+            border: 1px solid #ddd;
+            padding: 8px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 12px;
+            width: 100%;
+            margin-top: 8px;
+        }}
+        .finder-reset:hover {{ background: #eee; }}
+        .finder-results {{
+            padding: 0 15px 15px;
+        }}
+        .finder-results-header {{
+            font-weight: bold;
+            font-size: 14px;
+            color: #333;
+            padding: 10px 0;
+            border-bottom: 2px solid #27ae60;
+            margin-bottom: 5px;
+        }}
+        .finder-result-item {{
+            display: flex;
+            align-items: center;
+            padding: 10px 5px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: background 0.2s;
+        }}
+        .finder-result-item:hover {{ background: #f0fff4; }}
+        .finder-result-rank {{
+            font-weight: bold;
+            color: #27ae60;
+            width: 30px;
+            font-size: 14px;
+        }}
+        .finder-result-info {{ flex: 1; }}
+        .finder-result-info .fr-zip {{ font-weight: bold; color: #333; font-size: 13px; }}
+        .finder-result-info .fr-name {{ font-size: 11px; color: #888; }}
+        .finder-result-info .fr-city {{ font-size: 10px; color: #27ae60; }}
+        .finder-result-value {{
+            text-align: right;
+            font-size: 12px;
+            line-height: 1.4;
+        }}
+        .finder-result-value .fr-price {{ font-weight: bold; color: #1e3c72; }}
+        .finder-result-value .fr-services {{ font-size: 10px; color: #888; }}
     </style>
 </head>
 <body>
     <div id="header">
         <h1>🏠 Asuntojen hintakartta</h1>
-        <p>Vanhat osakeasunnot 2009-2026 | Tilastokeskus</p>
         <p class="forecast-note">* Ennuste, laskettu viimeisen 5 vuoden trendin perusteella</p>
+        <button id="mobile-menu-toggle" onclick="toggleMobileMenu()">☰</button>
     </div>
     
     <div id="controls">
@@ -335,6 +766,8 @@ html = f'''<!DOCTYPE html>
             <select id="metric-select" onchange="updateMap()">
                 <option value="keskihinta_aritm_nw" selected>Neliöhinta (€/m²)</option>
                 <option value="lkm_julk20">Kauppojen lukumäärä</option>
+                <option value="vuokratuotto">Vuokratuotto (%)</option>
+                <option value="hinta_tulot">Hinta/tulot -suhde</option>
             </select>
         </div>
         
@@ -445,9 +878,117 @@ html = f'''<!DOCTYPE html>
         <input type="text" id="search" placeholder="Hae postinumeroa..." onkeyup="filterMap()">
     </div>
     
+    <button id="top10-toggle" onclick="toggleTop10Panel()">🏆 Top 10</button>
+    <button id="finder-toggle" onclick="toggleFinderPanel()">🔍 Paras alue</button>
     <div id="map"></div>
+    
+    <!-- Paras alue -hakupaneeli -->
+    <div id="finder-panel">
+        <div class="finder-header">
+            <h2>🔍 Paras alue minulle</h2>
+            <button class="finder-close" onclick="closeFinderPanel()">&times;</button>
+        </div>
+        <div class="finder-form">
+            <div class="finder-group">
+                <label>📍 Kunta</label>
+                <select id="finder-kunta">
+                    <option value="all">Kaikki kunnat</option>
+                    {kunnat_options}
+                </select>
+            </div>
+            <div class="finder-group">
+                <label>🏠 Huoneistotyyppi</label>
+                <select id="finder-building-type">
+                    <option value="0" selected>Kaikki</option>
+                    <option value="1">Kerrostalo yksiöt</option>
+                    <option value="2">Kerrostalo kaksiot</option>
+                    <option value="3">Kerrostalo kolmiot+</option>
+                    <option value="5">Rivitalot</option>
+                </select>
+            </div>
+            <div class="finder-group">
+                <label>💰 Max neliöhinta</label>
+                <input type="range" id="finder-max-price" min="500" max="10000" step="100" value="4000" oninput="document.getElementById('finder-price-val').textContent=this.value+' €/m²'">
+                <div class="finder-range-value" id="finder-price-val">4000 €/m²</div>
+            </div>
+            <div class="finder-group">
+                <label>👥 Min väkiluku alueella</label>
+                <input type="range" id="finder-min-pop" min="0" max="10000" step="100" value="0" oninput="document.getElementById('finder-pop-val').textContent=this.value === '0' ? 'Ei rajoitusta' : this.value+' asukasta'">
+                <div class="finder-range-value" id="finder-pop-val">Ei rajoitusta</div>
+            </div>
+            <div class="finder-group">
+                <label>🏪 Vaaditut palvelut</label>
+                <div class="finder-checks">
+                    <label class="finder-check"><input type="checkbox" id="finder-kaupat"> 🛒 Kaupat</label>
+                    <label class="finder-check"><input type="checkbox" id="finder-koulut"> 🏫 Koulut</label>
+                    <label class="finder-check"><input type="checkbox" id="finder-paivakodit"> 🧒 Päiväkodit</label>
+                    <label class="finder-check"><input type="checkbox" id="finder-liikunta"> 💪 Liikunta</label>
+                    <label class="finder-check"><input type="checkbox" id="finder-terveys"> 🏥 Terveys</label>
+                    <label class="finder-check"><input type="checkbox" id="finder-liikenne"> 🚌 Julk.liikenne</label>
+                </div>
+            </div>
+            <div class="finder-group">
+                <label>⭐ Min palveluindeksi</label>
+                <input type="range" id="finder-min-palvelu" min="0" max="20" step="0.5" value="0" oninput="document.getElementById('finder-palvelu-val').textContent=this.value === '0' ? 'Ei rajoitusta' : this.value">
+                <div class="finder-range-value" id="finder-palvelu-val">Ei rajoitusta</div>
+            </div>
+            <button class="finder-btn" onclick="runFinderSearch()">🔍 Etsi sopivat alueet</button>
+            <button class="finder-reset" onclick="resetFinderSearch()">↩ Nollaa suodattimet</button>
+        </div>
+        <div class="finder-results" id="finder-results"></div>
+    </div>
+    
+    <!-- Top 10 -paneeli -->
+    <div id="top10-panel">
+        <div class="top10-header">
+            <h2>🏆 Top 10 -listat</h2>
+            <button class="top10-close" onclick="closeTop10Panel()">&times;</button>
+        </div>
+        <div class="top10-tabs">
+            <div class="top10-tab active" data-list="kalleimmat" onclick="switchTop10Tab(this)">💎 Kalleimmat</div>
+            <div class="top10-tab" data-list="halvimmat" onclick="switchTop10Tab(this)">💚 Halvimmat</div>
+            <div class="top10-tab" data-list="nousseet" onclick="switchTop10Tab(this)">📈 Eniten nousseet</div>
+            <div class="top10-tab" data-list="laskeneet" onclick="switchTop10Tab(this)">📉 Eniten laskeneet</div>
+            <div class="top10-tab" data-list="tuotto" onclick="switchTop10Tab(this)">💰 Paras tuotto</div>
+            <div class="top10-tab" data-list="palvelut" onclick="switchTop10Tab(this)">🏪 Parhaat palvelut</div>
+        </div>
+        <div class="top10-list" id="top10-list"></div>
+    </div>
     <div id="chart-container" style="display:none; position: absolute; top: 270px; left: 0; right: 0; bottom: 0; background: white; padding: 20px; overflow-y: auto; z-index: 1000;">
         <canvas id="bar-chart"></canvas>
+    </div>
+    
+    <!-- Aikasarjakaavio-modal -->
+    <div id="timeseries-modal" onclick="if(event.target===this)closeTimeSeriesModal()">
+        <div id="timeseries-panel">
+            <button class="ts-close-btn" onclick="closeTimeSeriesModal()">&times;</button>
+            <h2 id="ts-title"></h2>
+            <div class="ts-area-name" id="ts-area-name"></div>
+            <div class="ts-chart-section">
+                <h3>🏠 Hintakehitys (€/m²)</h3>
+                <canvas id="ts-price-chart"></canvas>
+            </div>
+            <div class="ts-chart-section">
+                <h3>📊 Kauppojen lukumäärä</h3>
+                <canvas id="ts-transactions-chart"></canvas>
+            </div>
+            <div class="ts-chart-section" id="ts-rent-section" style="display:none;">
+                <h3>🔑 Vuokrakehitys (€/m²/kk)</h3>
+                <canvas id="ts-rent-chart"></canvas>
+            </div>
+            <div class="ts-chart-section" id="ts-yield-section" style="display:none;">
+                <h3>💰 Vuokratuottokehitys (%)</h3>
+                <canvas id="ts-yield-chart"></canvas>
+            </div>
+            <div class="ts-chart-section" id="ts-population-section" style="display:none;">
+                <h3>👥 Väestö &amp; keski-ikä</h3>
+                <canvas id="ts-population-chart"></canvas>
+            </div>
+            <div class="ts-chart-section" id="ts-income-section" style="display:none;">
+                <h3>💶 Tulotaso &amp; työttömyys</h3>
+                <canvas id="ts-income-chart"></canvas>
+            </div>
+        </div>
     </div>
     
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -458,6 +999,16 @@ html = f'''<!DOCTYPE html>
             attribution: '© OpenStreetMap contributors'
         }}).addTo(map);
         
+        // Sulje mobiilivalikko kun karttaa klikataan
+        map.on('click', function() {{
+            var controls = document.getElementById('controls');
+            var button = document.getElementById('mobile-menu-toggle');
+            if (controls.classList.contains('mobile-menu-open')) {{
+                controls.classList.remove('mobile-menu-open');
+                button.innerHTML = '☰';
+            }}
+        }});
+        
         // GeoJSON data
         var geojsonData = {geojson_json};
         var availableYears = {years_json};
@@ -465,6 +1016,277 @@ html = f'''<!DOCTYPE html>
         var ennusteetMallit = {ennusteet_mallit_json};  // Ennustemallit (linear, arima, exponential)
         var geoJsonLayer;
         var currentLegend;
+        
+        // Aikasarjakaaviot
+        var selectedFeature = null;
+        var tsCharts = {{}};
+        
+        function destroyTsCharts() {{
+            Object.keys(tsCharts).forEach(function(k) {{ if (tsCharts[k]) tsCharts[k].destroy(); }});
+            tsCharts = {{}};
+        }}
+        
+        function openTimeSeriesModal() {{
+            if (!selectedFeature) return;
+            var feature = selectedFeature;
+            var props = feature.properties;
+            
+            document.getElementById('ts-title').textContent = props.postinumer;
+            document.getElementById('ts-area-name').textContent = props.name;
+            
+            destroyTsCharts();
+            
+            var btColors = {{'0': '#1e3c72', '1': '#e74c3c', '2': '#f39c12', '3': '#27ae60', '5': '#9b59b6'}};
+            var btNames = buildingTypes;
+            
+            // 1. Hintakehitys
+            var priceDatasets = [];
+            ['0', '1', '2', '3', '5'].forEach(function(bt) {{
+                var prices = [];
+                availableYears.forEach(function(y) {{
+                    prices.push(getValue(feature, y, bt, 'keskihinta_aritm_nw') || null);
+                }});
+                if (prices.some(function(v) {{ return v !== null; }})) {{
+                    priceDatasets.push({{
+                        label: btNames[bt],
+                        data: prices,
+                        borderColor: btColors[bt],
+                        backgroundColor: btColors[bt] + '20',
+                        tension: 0.3,
+                        spanGaps: true,
+                        pointRadius: 3
+                    }});
+                }}
+            }});
+            
+            var priceLabels = availableYears.map(function(y) {{ return y == 2026 ? y + '*' : y; }});
+            
+            tsCharts.price = new Chart(document.getElementById('ts-price-chart'), {{
+                type: 'line',
+                data: {{ labels: priceLabels, datasets: priceDatasets }},
+                options: {{
+                    responsive: true,
+                    interaction: {{ mode: 'index', intersect: false }},
+                    plugins: {{ legend: {{ position: 'bottom', labels: {{ boxWidth: 12, font: {{ size: 11 }} }} }} }},
+                    scales: {{ y: {{ beginAtZero: false, title: {{ display: true, text: '€/m²' }} }} }}
+                }}
+            }});
+            
+            // 2. Kauppojen lukumäärä
+            var txDatasets = [];
+            ['0', '1', '2', '3', '5'].forEach(function(bt) {{
+                var counts = [];
+                availableYears.forEach(function(y) {{
+                    counts.push(getValue(feature, y, bt, 'lkm_julk20') || null);
+                }});
+                if (counts.some(function(v) {{ return v !== null; }})) {{
+                    txDatasets.push({{
+                        label: btNames[bt],
+                        data: counts,
+                        borderColor: btColors[bt],
+                        backgroundColor: btColors[bt] + '40',
+                        tension: 0.3,
+                        spanGaps: true,
+                        pointRadius: 3
+                    }});
+                }}
+            }});
+            
+            tsCharts.transactions = new Chart(document.getElementById('ts-transactions-chart'), {{
+                type: 'line',
+                data: {{ labels: priceLabels, datasets: txDatasets }},
+                options: {{
+                    responsive: true,
+                    interaction: {{ mode: 'index', intersect: false }},
+                    plugins: {{ legend: {{ position: 'bottom', labels: {{ boxWidth: 12, font: {{ size: 11 }} }} }} }},
+                    scales: {{ y: {{ beginAtZero: true, title: {{ display: true, text: 'kpl' }} }} }}
+                }}
+            }});
+            
+            // 3. Vuokrakehitys
+            var rentSection = document.getElementById('ts-rent-section');
+            var vuokra = props.vuokra;
+            if (vuokra && Object.keys(vuokra).length > 0) {{
+                rentSection.style.display = 'block';
+                var rentDatasets = [];
+                var rentYears = Object.keys(vuokra).sort();
+                
+                ['0', '1', '2', '3'].forEach(function(bt) {{
+                    var rents = [];
+                    rentYears.forEach(function(y) {{
+                        var rd = vuokra[y] && vuokra[y][bt];
+                        rents.push(rd ? rd.keskivuokra : null);
+                    }});
+                    if (rents.some(function(v) {{ return v !== null; }})) {{
+                        rentDatasets.push({{
+                            label: btNames[bt] || bt,
+                            data: rents,
+                            borderColor: btColors[bt],
+                            backgroundColor: btColors[bt] + '20',
+                            tension: 0.3,
+                            spanGaps: true,
+                            pointRadius: 3
+                        }});
+                    }}
+                }});
+                
+                tsCharts.rent = new Chart(document.getElementById('ts-rent-chart'), {{
+                    type: 'line',
+                    data: {{ labels: rentYears, datasets: rentDatasets }},
+                    options: {{
+                        responsive: true,
+                        interaction: {{ mode: 'index', intersect: false }},
+                        plugins: {{ legend: {{ position: 'bottom', labels: {{ boxWidth: 12, font: {{ size: 11 }} }} }} }},
+                        scales: {{ y: {{ beginAtZero: false, title: {{ display: true, text: '€/m²/kk' }} }} }}
+                    }}
+                }});
+            }} else {{
+                rentSection.style.display = 'none';
+            }}
+            
+            // 4. Vuokratuotto
+            var yieldSection = document.getElementById('ts-yield-section');
+            if (vuokra && Object.keys(vuokra).length > 0) {{
+                var yieldDatasets = [];
+                var yieldYears = Object.keys(vuokra).sort();
+                
+                ['0', '1', '2', '3'].forEach(function(bt) {{
+                    var yields = [];
+                    yieldYears.forEach(function(y) {{
+                        var yv = getVuokratuotto(feature, y, bt);
+                        yields.push(yv || null);
+                    }});
+                    if (yields.some(function(v) {{ return v !== null; }})) {{
+                        yieldDatasets.push({{
+                            label: btNames[bt] || bt,
+                            data: yields,
+                            borderColor: btColors[bt],
+                            backgroundColor: btColors[bt] + '20',
+                            tension: 0.3,
+                            spanGaps: true,
+                            pointRadius: 3
+                        }});
+                    }}
+                }});
+                
+                if (yieldDatasets.length > 0) {{
+                    yieldSection.style.display = 'block';
+                    tsCharts.yieldChart = new Chart(document.getElementById('ts-yield-chart'), {{
+                        type: 'line',
+                        data: {{ labels: yieldYears, datasets: yieldDatasets }},
+                        options: {{
+                            responsive: true,
+                            interaction: {{ mode: 'index', intersect: false }},
+                            plugins: {{ legend: {{ position: 'bottom', labels: {{ boxWidth: 12, font: {{ size: 11 }} }} }} }},
+                            scales: {{ y: {{ beginAtZero: false, title: {{ display: true, text: '%' }} }} }}
+                        }}
+                    }});
+                }} else {{
+                    yieldSection.style.display = 'none';
+                }}
+            }} else {{
+                yieldSection.style.display = 'none';
+            }}
+            
+            // 5. Väestö & keski-ikä
+            var popSection = document.getElementById('ts-population-section');
+            var paavo = props.paavo_aikasarja;
+            if (paavo && Object.keys(paavo).length > 0) {{
+                popSection.style.display = 'block';
+                var paavoYears = Object.keys(paavo).sort();
+                var displayYears = paavoYears.map(function(y) {{ return parseInt(y) - 1; }});
+                
+                tsCharts.population = new Chart(document.getElementById('ts-population-chart'), {{
+                    type: 'line',
+                    data: {{
+                        labels: displayYears,
+                        datasets: [{{
+                            label: 'Asukkaat',
+                            data: paavoYears.map(function(y) {{ return paavo[y].vaesto || null; }}),
+                            borderColor: '#3498db',
+                            backgroundColor: '#3498db20',
+                            tension: 0.3,
+                            pointRadius: 3,
+                            yAxisID: 'y'
+                        }}, {{
+                            label: 'Keski-ikä (v)',
+                            data: paavoYears.map(function(y) {{ return paavo[y].keski_ika || null; }}),
+                            borderColor: '#e67e22',
+                            backgroundColor: '#e67e2220',
+                            tension: 0.3,
+                            pointRadius: 3,
+                            yAxisID: 'y1'
+                        }}]
+                    }},
+                    options: {{
+                        responsive: true,
+                        interaction: {{ mode: 'index', intersect: false }},
+                        plugins: {{ legend: {{ position: 'bottom', labels: {{ boxWidth: 12, font: {{ size: 11 }} }} }} }},
+                        scales: {{
+                            y: {{ position: 'left', title: {{ display: true, text: 'Asukkaat' }} }},
+                            y1: {{ position: 'right', title: {{ display: true, text: 'Keski-ikä (v)' }}, grid: {{ drawOnChartArea: false }} }}
+                        }}
+                    }}
+                }});
+            }} else {{
+                popSection.style.display = 'none';
+            }}
+            
+            // 6. Tulotaso & työttömyys
+            var incSection = document.getElementById('ts-income-section');
+            if (paavo && Object.keys(paavo).length > 0) {{
+                incSection.style.display = 'block';
+                var paavoYears2 = Object.keys(paavo).sort();
+                var displayYears2 = paavoYears2.map(function(y) {{ return parseInt(y) - 1; }});
+                
+                tsCharts.income = new Chart(document.getElementById('ts-income-chart'), {{
+                    type: 'line',
+                    data: {{
+                        labels: displayYears2,
+                        datasets: [{{
+                            label: 'Keskitulo (€/v)',
+                            data: paavoYears2.map(function(y) {{ return paavo[y].keskitulo || null; }}),
+                            borderColor: '#27ae60',
+                            backgroundColor: '#27ae6020',
+                            tension: 0.3,
+                            pointRadius: 3,
+                            yAxisID: 'y'
+                        }}, {{
+                            label: 'Työttömyys (%)',
+                            data: paavoYears2.map(function(y) {{ return paavo[y].tyottomyysaste || null; }}),
+                            borderColor: '#e74c3c',
+                            backgroundColor: '#e74c3c20',
+                            tension: 0.3,
+                            pointRadius: 3,
+                            yAxisID: 'y1'
+                        }}]
+                    }},
+                    options: {{
+                        responsive: true,
+                        interaction: {{ mode: 'index', intersect: false }},
+                        plugins: {{ legend: {{ position: 'bottom', labels: {{ boxWidth: 12, font: {{ size: 11 }} }} }} }},
+                        scales: {{
+                            y: {{ position: 'left', title: {{ display: true, text: '€/vuosi' }} }},
+                            y1: {{ position: 'right', title: {{ display: true, text: '%' }}, grid: {{ drawOnChartArea: false }} }}
+                        }}
+                    }}
+                }});
+            }} else {{
+                incSection.style.display = 'none';
+            }}
+            
+            document.getElementById('timeseries-modal').style.display = 'block';
+        }}
+        
+        function closeTimeSeriesModal() {{
+            document.getElementById('timeseries-modal').style.display = 'none';
+            destroyTsCharts();
+        }}
+        
+        // Sulje modal Esc-näppäimellä
+        document.addEventListener('keydown', function(e) {{
+            if (e.key === 'Escape') closeTimeSeriesModal();
+        }});
         
         // Animaatio-muuttujat
         var animationInterval = null;
@@ -520,6 +1342,95 @@ html = f'''<!DOCTYPE html>
             else return '#8B0000';
         }}
         
+        // Värit hinta/tulot -suhteelle - matala = vihreä (edullinen), korkea = punainen (kallis)
+        function getColorRatio(ratio) {{
+            if (ratio > 12) return '#8B0000';
+            else if (ratio > 10) return '#e74c3c';
+            else if (ratio > 8) return '#f39c12';
+            else if (ratio > 6) return '#f1c40f';
+            else if (ratio > 5) return '#9acd32';
+            else if (ratio > 4) return '#27ae60';
+            else return '#2ecc71';
+        }}
+        
+        // Hae hinta/tulot -suhde (vuosien palkat per 60m² asunto)
+        function getHintaTuloSuhde(feature, year, buildingType) {{
+            var priceData = feature.properties.data;
+            if (!priceData || !priceData[year] || !priceData[year][buildingType]) return null;
+            var price = priceData[year][buildingType].keskihinta_aritm_nw;
+            if (!price || price <= 0) return null;
+            
+            // Paavo-data on +1 vuosi (pno_tilasto_2025 = tiedot vuodelta 2024)
+            var paavoYear = parseInt(year) + 1;
+            var paavo = feature.properties.paavo_aikasarja;
+            if (!paavo) return null;
+            
+            // Etsi paras Paavo-vuosi
+            var tulot = null;
+            if (paavo[paavoYear] && paavo[paavoYear].keskitulo) {{
+                tulot = paavo[paavoYear].keskitulo;
+            }} else {{
+                // Fallback: lähin vanhempi vuosi
+                var vuodet = Object.keys(paavo).map(Number).sort(function(a,b) {{ return b-a; }});
+                for (var i = 0; i < vuodet.length; i++) {{
+                    if (vuodet[i] <= paavoYear && paavo[vuodet[i]] && paavo[vuodet[i]].keskitulo) {{
+                        tulot = paavo[vuodet[i]].keskitulo;
+                        break;
+                    }}
+                }}
+            }}
+            if (!tulot || tulot <= 0) return null;
+            
+            return (price * 60) / tulot;
+        }}
+        
+        // Värit vuokratuotolle (%) - korkea tuotto = vihreä
+        function getColorYield(yieldPct) {{
+            if (yieldPct > 8) return '#2ecc71';
+            else if (yieldPct > 7) return '#27ae60';
+            else if (yieldPct > 6) return '#9acd32';
+            else if (yieldPct > 5) return '#f1c40f';
+            else if (yieldPct > 4) return '#f39c12';
+            else if (yieldPct > 3) return '#e74c3c';
+            else return '#8B0000';
+        }}
+        
+        // Hae vuokratuotto datasta
+        function getVuokratuotto(feature, year, buildingType) {{
+            var vuokra = feature.properties.vuokra;
+            if (!vuokra || !vuokra[year]) return null;
+            
+            // Ei vuokradataa rivitaloille
+            var bt = buildingType;
+            if (bt === '5') return null;
+            
+            var rentData = vuokra[year][bt];
+            if (!rentData || !rentData.keskivuokra) return null;
+            
+            var priceData = feature.properties.data;
+            if (!priceData || !priceData[year] || !priceData[year][bt]) return null;
+            
+            var price = priceData[year][bt].keskihinta_aritm_nw;
+            if (!price || price <= 0) return null;
+            
+            // Vuokratuotto: (kuukausivuokra × 12) / ostohinta × 100
+            var monthlyRent = rentData.keskivuokra;
+            var annualRent = monthlyRent * 12;
+            return (annualRent / price) * 100;
+        }}
+        
+        // Hae vuokra datasta
+        function getVuokra(feature, year, buildingType) {{
+            var vuokra = feature.properties.vuokra;
+            if (!vuokra || !vuokra[year]) return null;
+            var bt = buildingType;
+            if (bt === '5') return null;
+            var rentData = vuokra[year][bt];
+            if (!rentData || !rentData.keskivuokra) return null;
+            return rentData.keskivuokra;
+        }}
+        
+        
         // Hae arvo datasta
         function getValue(feature, year, buildingType, metric) {{
             var data = feature.properties.data;
@@ -545,6 +1456,58 @@ html = f'''<!DOCTYPE html>
             // Muille vuosille käytä tavallista dataa
             if (!data || !data[year] || !data[year][buildingType]) return null;
             return data[year][buildingType][metric] || null;
+        }}
+        
+        // Yleinen mittarin arvon haku - reitittää oikeaan getter-funktioon
+        function getMetricValue(feature, year, buildingType, metric) {{
+            if (metric === 'vuokratuotto') return getVuokratuotto(feature, year, buildingType);
+            if (metric === 'hinta_tulot') return getHintaTuloSuhde(feature, year, buildingType);
+            return getValue(feature, year, buildingType, metric);
+        }}
+        
+        // Mittarin yksikkö
+        function getMetricUnit(metric) {{
+            if (metric === 'keskihinta_aritm_nw') return 'EUR/m\u00b2';
+            if (metric === 'vuokratuotto') return '%';
+            if (metric === 'hinta_tulot') return 'v';
+            return 'kpl';
+        }}
+        
+        // Mittarin väritys
+        function getMetricColor(metric, value) {{
+            if (metric === 'keskihinta_aritm_nw') return getColorPrice(value);
+            if (metric === 'vuokratuotto') return getColorYield(value);
+            if (metric === 'hinta_tulot') return getColorRatio(value);
+            return getColorTransactions(value);
+        }}
+        
+        // Mittarin nimi
+        function getMetricName(metric) {{
+            if (metric === 'keskihinta_aritm_nw') return 'Neliöhinta';
+            if (metric === 'vuokratuotto') return 'Vuokratuotto';
+            if (metric === 'hinta_tulot') return 'Hinta/tulot';
+            return 'Kaupat';
+        }}
+        
+        // Muotoile mittarin arvo popup-näkymään
+        function formatMetricValue(value, metric) {{
+            if (metric === 'vuokratuotto') return value.toFixed(1) + ' %';
+            if (metric === 'hinta_tulot') return value.toFixed(1) + ' v';
+            return value.toLocaleString() + ' ' + getMetricUnit(metric);
+        }}
+        
+        // Toggle mobiilivalikko
+        function toggleMobileMenu() {{
+            var controls = document.getElementById('controls');
+            var button = document.getElementById('mobile-menu-toggle');
+            
+            if (controls.classList.contains('mobile-menu-open')) {{
+                controls.classList.remove('mobile-menu-open');
+                button.innerHTML = '☰';
+            }} else {{
+                controls.classList.add('mobile-menu-open');
+                button.innerHTML = '✕';
+            }}
         }}
         
         // Päivitä kartta
@@ -624,7 +1587,7 @@ html = f'''<!DOCTYPE html>
             }} else if (mode === 'change') {{
                 createChangeMap(buildingType, metric);
             }} else if (mode === 'analysis') {{
-                createAnalysisMap();
+                createAnalysisMap(buildingType, metric);
             }} else if (mode === 'animation') {{
                 createAnimationFrame(animationCurrentYear, buildingType, metric);
             }} else if (mode === 'animation-chart') {{
@@ -641,7 +1604,7 @@ html = f'''<!DOCTYPE html>
                 stopChartAnimation();
             }}
             var buildingType = document.getElementById('building-type-select').value;
-            var metric = 'keskihinta_aritm_nw';
+            var metric = document.getElementById('metric-select').value;
             var city = document.getElementById('chart-city-select').value;
             createChartFrame(chartAnimationCurrentYear, buildingType, metric, city);
         }}
@@ -650,12 +1613,22 @@ html = f'''<!DOCTYPE html>
         function createAbsoluteMap(buildingType, metric) {{
             var selectedYear = document.getElementById('year-select').value;
             var isPrice = (metric === 'keskihinta_aritm_nw');
+            var isYield = (metric === 'vuokratuotto');
+            var isRatio = (metric === 'hinta_tulot');
             
             geoJsonLayer = L.geoJSON(geojsonData, {{
                 smoothFactor: 0,  // Ei geometrian yksinkertaistusta, tarkemmat rajat
                 style: function(feature) {{
-                    var value = getValue(feature, selectedYear, buildingType, metric);
-                    var color = value ? (isPrice ? getColorPrice(value) : getColorTransactions(value)) : '#ccc';
+                    if (isYield) {{
+                        var yieldVal = getVuokratuotto(feature, selectedYear, buildingType);
+                        var color = yieldVal ? getColorYield(yieldVal) : '#ccc';
+                    }} else if (isRatio) {{
+                        var ratioVal = getHintaTuloSuhde(feature, selectedYear, buildingType);
+                        var color = ratioVal ? getColorRatio(ratioVal) : '#ccc';
+                    }} else {{
+                        var value = getValue(feature, selectedYear, buildingType, metric);
+                        var color = value ? (isPrice ? getColorPrice(value) : getColorTransactions(value)) : '#ccc';
+                    }}
                     return {{
                         fillColor: color,
                         fillOpacity: 0.7,
@@ -666,9 +1639,68 @@ html = f'''<!DOCTYPE html>
                 }},
                 onEachFeature: function(feature, layer) {{
                     var props = feature.properties;
-                    var value = getValue(feature, selectedYear, buildingType, metric);
                     
                     var popupContent;
+                    
+                    if (isRatio) {{
+                        var ratioVal = getHintaTuloSuhde(feature, selectedYear, buildingType);
+                        if (ratioVal) {{
+                            var priceVal = getValue(feature, selectedYear, buildingType, 'keskihinta_aritm_nw');
+                            var paavoY = parseInt(selectedYear) + 1;
+                            var pa = props.paavo_aikasarja;
+                            var tuloVal = 0;
+                            if (pa && pa[paavoY]) tuloVal = pa[paavoY].keskitulo;
+                            else if (pa) {{
+                                var vv = Object.keys(pa).map(Number).sort(function(a,b){{return b-a;}});
+                                for (var vi = 0; vi < vv.length; vi++) {{ if (vv[vi] <= paavoY && pa[vv[vi]].keskitulo) {{ tuloVal = pa[vv[vi]].keskitulo; break; }} }}
+                            }}
+                            popupContent = '<div class="popup-content">' +
+                                '<h3>' + props.postinumer + '</h3>' +
+                                '<div class="price" style="color: ' + getColorRatio(ratioVal) + ';">' + ratioVal.toFixed(1) + ' vuotta</div>' +
+                                '<div class="details">' + props.name + '</div>' +
+                                '<div class="details">' + selectedYear + ' | ' + buildingTypes[buildingType] + '</div>' +
+                                '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
+                                '<strong>🏠 Hinta/tulot -suhde:</strong><br>' +
+                                '💰 Neliöhinta: ' + priceVal.toLocaleString() + ' €/m²<br>' +
+                                '📐 60m² asunto: ' + (priceVal * 60).toLocaleString() + ' €<br>' +
+                                '💶 Keskitulo: ' + tuloVal.toLocaleString() + ' €/v<br>' +
+                                '📊 Suhde: <strong>' + ratioVal.toFixed(1) + ' vuoden palkat</strong></div>' +
+                                '</div>';
+                        }} else {{
+                            popupContent = '<div class="popup-content">' +
+                                '<h3>' + props.postinumer + '</h3>' +
+                                '<div class="details">' + props.name + '</div>' +
+                                '<div class="details" style="color: #999; font-style: italic;">Ei hinta- tai tulotietoja (' + selectedYear + ' | ' + buildingTypes[buildingType] + ')</div>' +
+                                '</div>';
+                        }}
+                    }} else if (isYield) {{
+                        var yieldVal = getVuokratuotto(feature, selectedYear, buildingType);
+                        var rentVal = getVuokra(feature, selectedYear, buildingType);
+                        var priceVal = getValue(feature, selectedYear, buildingType, 'keskihinta_aritm_nw');
+                        
+                        if (yieldVal) {{
+                            popupContent = '<div class="popup-content">' +
+                                '<h3>' + props.postinumer + '</h3>' +
+                                '<div class="price" style="color: ' + getColorYield(yieldVal) + ';">' + yieldVal.toFixed(1) + ' %</div>' +
+                                '<div class="details">' + props.name + '</div>' +
+                                '<div class="details">' + selectedYear + ' | ' + buildingTypes[buildingType] + '</div>' +
+                                '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
+                                '<strong>📊 Vuokra vs. osto:</strong><br>' +
+                                '🏠 Ostohinta: ' + priceVal.toLocaleString() + ' €/m²<br>' +
+                                '🔑 Vuokra: ' + rentVal.toFixed(2) + ' €/m²/kk<br>' +
+                                '💰 Vuosivuokra: ' + (rentVal * 12).toFixed(0) + ' €/m²/v<br>' +
+                                '📈 Bruttovuokratuotto: <strong>' + yieldVal.toFixed(2) + ' %</strong></div>' +
+                                '</div>';
+                        }} else {{
+                            popupContent = '<div class="popup-content">' +
+                                '<h3>' + props.postinumer + '</h3>' +
+                                '<div class="details">' + props.name + '</div>' +
+                                '<div class="details" style="color: #999; font-style: italic;">Ei vuokra- tai hintatietoja (' + selectedYear + ' | ' + buildingTypes[buildingType] + ')</div>' +
+                                '</div>';
+                        }}
+                    }} else {{
+                        var value = getValue(feature, selectedYear, buildingType, metric);
+                    
                     if (value) {{
                         var metricLabel = isPrice ? 'EUR/m²' : 'kpl';
                         popupContent = '<div class="popup-content">' +
@@ -716,6 +1748,19 @@ html = f'''<!DOCTYPE html>
                                         'Väestötiheys: ' + paavo.vaestotiheys.toFixed(0) + ' as/km²</div>';
                                 }}
                             }}
+                        }}
+                        
+                        // Lisää vuokratiedot jos saatavilla
+                        var rentVal = getVuokra(feature, selectedYear, buildingType);
+                        if (rentVal && isPrice) {{
+                            var yieldVal = getVuokratuotto(feature, selectedYear, buildingType);
+                            popupContent += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
+                                '<strong>🔑 Vuokra vs. osto:</strong><br>' +
+                                'Vuokra: ' + rentVal.toFixed(2) + ' €/m²/kk<br>';
+                            if (yieldVal) {{
+                                popupContent += 'Bruttovuokratuotto: <strong style="color:' + getColorYield(yieldVal) + '">' + yieldVal.toFixed(1) + ' %</strong>';
+                            }}
+                            popupContent += '</div>';
                         }}
                         
                         // Lisää palvelutiedot jos saatavilla
@@ -796,8 +1841,12 @@ html = f'''<!DOCTYPE html>
                         
                         popupContent += '</div>';
                     }}
-                    layer.bindPopup(popupContent);
+                    }} // close isRatio/isYield/else
+                    // Lisää aikasarjanappi popupiin
+                    popupContent = popupContent.replace(/<\\/div>$/, '<button class="ts-btn" onclick="openTimeSeriesModal()">📊 Näytä aikasarja</button></div>');
+                    layer.bindPopup(popupContent, {{ maxWidth: 300 }});
                     
+                    layer.on('click', function() {{ selectedFeature = feature; }});
                     layer.on('mouseover', function(e) {{
                         this.setStyle({{ fillOpacity: 0.9, weight: 2 }});
                     }});
@@ -819,8 +1868,8 @@ html = f'''<!DOCTYPE html>
             geoJsonLayer = L.geoJSON(geojsonData, {{
                 smoothFactor: 0,  // Ei geometrian yksinkertaistusta, tarkemmat rajat
                 style: function(feature) {{
-                    var valueFrom = getValue(feature, yearFrom, buildingType, metric);
-                    var valueTo = getValue(feature, yearTo, buildingType, metric);
+                    var valueFrom = getMetricValue(feature, yearFrom, buildingType, metric);
+                    var valueTo = getMetricValue(feature, yearTo, buildingType, metric);
                     
                     if (valueFrom && valueTo && valueFrom > 0) {{
                         var change = ((valueTo - valueFrom) / valueFrom) * 100;
@@ -843,24 +1892,24 @@ html = f'''<!DOCTYPE html>
                 }},
                 onEachFeature: function(feature, layer) {{
                     var props = feature.properties;
-                    var valueFrom = getValue(feature, yearFrom, buildingType, metric);
-                    var valueTo = getValue(feature, yearTo, buildingType, metric);
+                    var valueFrom = getMetricValue(feature, yearFrom, buildingType, metric);
+                    var valueTo = getMetricValue(feature, yearTo, buildingType, metric);
                     
                     var popupContent;
                     if (valueFrom && valueTo && valueFrom > 0) {{
                         var change = ((valueTo - valueFrom) / valueFrom) * 100;
                         var absChange = valueTo - valueFrom;
                         var changeSign = change >= 0 ? '+' : '';
-                        var isPrice = (metric === 'keskihinta_aritm_nw');
-                        var metricLabel = isPrice ? 'EUR/m²' : 'kpl';
+                        var unit = getMetricUnit(metric);
+                        var isDecimal = (metric === 'vuokratuotto' || metric === 'hinta_tulot');
                         
                         popupContent = '<div class="popup-content">' +
                             '<h3>' + props.postinumer + '</h3>' +
                             '<div class="price">' + changeSign + change.toFixed(1) + ' %</div>' +
                             '<div class="details">' + props.name + '</div>' +
-                            '<div class="details">' + yearFrom + ': ' + valueFrom.toLocaleString() + ' ' + metricLabel + '<br>' +
-                            yearTo + ': ' + valueTo.toLocaleString() + ' ' + metricLabel + '<br>' +
-                            'Muutos: ' + changeSign + absChange.toLocaleString() + ' ' + metricLabel + '</div>' +
+                            '<div class="details">' + yearFrom + ': ' + (isDecimal ? valueFrom.toFixed(1) : valueFrom.toLocaleString()) + ' ' + unit + '<br>' +
+                            yearTo + ': ' + (isDecimal ? valueTo.toFixed(1) : valueTo.toLocaleString()) + ' ' + unit + '<br>' +
+                            'Muutos: ' + changeSign + (isDecimal ? absChange.toFixed(1) : absChange.toLocaleString()) + ' ' + unit + '</div>' +
                             '<div class="details">' + buildingTypes[buildingType] + '</div>' +
                             '</div>';
                     }} else {{
@@ -871,8 +1920,10 @@ html = f'''<!DOCTYPE html>
                             '(' + yearFrom + ' - ' + yearTo + ' | ' + buildingTypes[buildingType] + ')</div>' +
                             '</div>';
                     }}
-                    layer.bindPopup(popupContent);
+                    popupContent = popupContent.replace(/<\\/div>$/, '<button class="ts-btn" onclick="openTimeSeriesModal()">📊 Näytä aikasarja</button></div>');
+                    layer.bindPopup(popupContent, {{ maxWidth: 300 }});
                     
+                    layer.on('click', function() {{ selectedFeature = feature; }});
                     layer.on('mouseover', function(e) {{
                         this.setStyle({{ fillOpacity: 0.9, weight: 2 }});
                     }});
@@ -899,15 +1950,26 @@ html = f'''<!DOCTYPE html>
         }}
         
         // Luo trendianalyysikartta
-        function createAnalysisMap() {{
+        function createAnalysisMap(buildingType, metric) {{
+            var isPrice = (metric === 'keskihinta_aritm_nw');
+            
             geoJsonLayer = L.geoJSON(geojsonData, {{
                 smoothFactor: 0,
                 style: function(feature) {{
-                    var analyysi = feature.properties.analyysi;
+                    var change5v;
+                    if (isPrice) {{
+                        var analyysi = feature.properties.analyysi;
+                        change5v = (analyysi && analyysi.hinta_muutos_5v !== null && analyysi.hinta_muutos_5v !== undefined) ? analyysi.hinta_muutos_5v : null;
+                    }} else {{
+                        // Laske 5v muutos lennossa muille mittareille
+                        var valFrom = getMetricValue(feature, '2021', buildingType, metric);
+                        var valTo = getMetricValue(feature, '2025', buildingType, metric);
+                        change5v = (valFrom && valTo && valFrom > 0) ? ((valTo - valFrom) / valFrom * 100) : null;
+                    }}
                     
-                    if (analyysi && analyysi.hinta_muutos_5v !== null && analyysi.hinta_muutos_5v !== undefined) {{
+                    if (change5v !== null) {{
                         return {{
-                            fillColor: getColorTrend(analyysi.hinta_muutos_5v),
+                            fillColor: getColorTrend(change5v),
                             fillOpacity: 0.7,
                             color: '#fff',
                             weight: 1,
@@ -925,43 +1987,81 @@ html = f'''<!DOCTYPE html>
                 }},
                 onEachFeature: function(feature, layer) {{
                     var props = feature.properties;
-                    var analyysi = props.analyysi;
-                    
                     var popupContent;
-                    if (analyysi && analyysi.hinta_muutos_5v !== null && analyysi.hinta_muutos_5v !== undefined) {{
-                        var changeSign = analyysi.hinta_muutos_5v >= 0 ? '+' : '';
-                        var trendiEmoji = analyysi.trendi === 'nouseva' ? '📈' : 
-                                         analyysi.trendi === 'laskeva' ? '📉' : '📊';
-                        var aktiivisuusEmoji = analyysi.aktiivisuus === 'korkea' ? '🔥' : 
-                                              analyysi.aktiivisuus === 'keskitaso' ? '▪️' : '❄️';
-                        
-                        popupContent = '<div class="popup-content">' +
-                            '<h3>' + props.postinumer + '</h3>' +
-                            '<div class="price">' + changeSign + analyysi.hinta_muutos_5v.toFixed(1) + ' %</div>' +
-                            '<div class="details">' + props.name + '</div>' +
-                            '<div class="details" style="margin-top: 10px;">' +
-                            '<strong>🏠 Asuntohinnat (2021-2025)</strong><br>' +
-                            trendiEmoji + ' ' + analyysi.trendi.charAt(0).toUpperCase() + analyysi.trendi.slice(1) + '<br>' +
-                            '📊 Kauppoja: ' + analyysi.keskim_kaupat_vuosi.toFixed(1) + ' / vuosi<br>' +
-                            aktiivisuusEmoji + ' Aktiivisuus: ' + analyysi.aktiivisuus + '<br>' +
-                            '📈 Volatiliteetti: ' + analyysi.volatiliteetti.toFixed(1) + ' %</div>';
-                        
-                        // Lisää väestötietojen muutokset 5v ajalta
-                        if (props.paavo_aikasarja) {{
-                            // Laske muutokset: 2021 -> 2025 (Paavo 2022 -> 2026, mutta käytä saatavilla olevaa)
-                            var paavoAlku = 2022; // 2021 + 1
-                            var paavoLoppu = 2026; // 2025 + 1
-                            var vuodet = Object.keys(props.paavo_aikasarja).map(Number).sort();
+                    
+                    if (isPrice) {{
+                        // Alkuperäinen hinta-analyysi pre-computed datasta
+                        var analyysi = props.analyysi;
+                        if (analyysi && analyysi.hinta_muutos_5v !== null && analyysi.hinta_muutos_5v !== undefined) {{
+                            var changeSign = analyysi.hinta_muutos_5v >= 0 ? '+' : '';
+                            var trendiEmoji = analyysi.trendi === 'nouseva' ? String.fromCodePoint(0x1F4C8) : 
+                                             analyysi.trendi === 'laskeva' ? String.fromCodePoint(0x1F4C9) : String.fromCodePoint(0x1F4CA);
+                            var aktiivisuusEmoji = analyysi.aktiivisuus === 'korkea' ? String.fromCodePoint(0x1F525) : 
+                                                  analyysi.aktiivisuus === 'keskitaso' ? String.fromCodePoint(0x25AA, 0xFE0F) : String.fromCodePoint(0x2744, 0xFE0F);
                             
-                            // Etsi lähimmät saatavilla olevat vuodet
+                            popupContent = '<div class="popup-content">' +
+                                '<h3>' + props.postinumer + '</h3>' +
+                                '<div class="price">' + changeSign + analyysi.hinta_muutos_5v.toFixed(1) + ' %</div>' +
+                                '<div class="details">' + props.name + '</div>' +
+                                '<div class="details" style="margin-top: 10px;">' +
+                                '<strong>' + String.fromCodePoint(0x1F3E0) + ' Asuntohinnat (2021-2025)</strong><br>' +
+                                trendiEmoji + ' ' + analyysi.trendi.charAt(0).toUpperCase() + analyysi.trendi.slice(1) + '<br>' +
+                                String.fromCodePoint(0x1F4CA) + ' Kauppoja: ' + analyysi.keskim_kaupat_vuosi.toFixed(1) + ' / vuosi<br>' +
+                                aktiivisuusEmoji + ' Aktiivisuus: ' + analyysi.aktiivisuus + '<br>' +
+                                String.fromCodePoint(0x1F4C8) + ' Volatiliteetti: ' + analyysi.volatiliteetti.toFixed(1) + ' %</div>';
+                        }} else {{
+                            popupContent = '<div class="popup-content">' +
+                                '<h3>' + props.postinumer + '</h3>' +
+                                '<div class="details">' + props.name + '</div>' +
+                                '<div class="details" style="color: #999; font-style: italic;">Ei riitt' + String.fromCharCode(228) + 'v' + String.fromCharCode(228) + 'sti dataa trendianalyysiin</div>' +
+                                '</div>';
+                        }}
+                    }} else {{
+                        // Muut mittarit: laske 5v muutos lennossa
+                        var valFrom = getMetricValue(feature, '2021', buildingType, metric);
+                        var valTo = getMetricValue(feature, '2025', buildingType, metric);
+                        
+                        if (valFrom && valTo && valFrom > 0) {{
+                            var change5v = ((valTo - valFrom) / valFrom * 100);
+                            var changeSign = change5v >= 0 ? '+' : '';
+                            var mName = getMetricName(metric);
+                            var unit = getMetricUnit(metric);
+                            var isDecimal = (metric === 'vuokratuotto' || metric === 'hinta_tulot');
+                            var trendiLabel = change5v > 5 ? 'Nouseva' : (change5v < -5 ? 'Laskeva' : 'Vakaa');
+                            var trendiEmoji = change5v > 5 ? String.fromCodePoint(0x1F4C8) : 
+                                             (change5v < -5 ? String.fromCodePoint(0x1F4C9) : String.fromCodePoint(0x1F4CA));
+                            
+                            popupContent = '<div class="popup-content">' +
+                                '<h3>' + props.postinumer + '</h3>' +
+                                '<div class="price">' + changeSign + change5v.toFixed(1) + ' %</div>' +
+                                '<div class="details">' + props.name + '</div>' +
+                                '<div class="details" style="margin-top: 10px;">' +
+                                '<strong>' + mName + ' (2021-2025)</strong><br>' +
+                                trendiEmoji + ' ' + trendiLabel + '<br>' +
+                                '2021: ' + (isDecimal ? valFrom.toFixed(1) : valFrom.toLocaleString()) + ' ' + unit + '<br>' +
+                                '2025: ' + (isDecimal ? valTo.toFixed(1) : valTo.toLocaleString()) + ' ' + unit + '</div>';
+                        }} else {{
+                            popupContent = '<div class="popup-content">' +
+                                '<h3>' + props.postinumer + '</h3>' +
+                                '<div class="details">' + props.name + '</div>' +
+                                '<div class="details" style="color: #999; font-style: italic;">Ei riitt' + String.fromCharCode(228) + 'v' + String.fromCharCode(228) + 'sti dataa trendianalyysiin</div>' +
+                                '</div>';
+                        }}
+                    }}
+                    
+                    // Lisää väestö- ja palvelutiedot (kaikille mittareille)
+                    if (popupContent.indexOf('font-style: italic') === -1) {{
+                        if (props.paavo_aikasarja) {{
+                            var paavoAlku = 2022;
+                            var paavoLoppu = 2026;
+                            var vuodet = Object.keys(props.paavo_aikasarja).map(Number).sort();
                             var alkuVuosi = vuodet.find(v => v >= paavoAlku) || vuodet[vuodet.length - 1];
-                            var loppuVuosi = vuodet[vuodet.length - 1]; // Viimeisin saatavilla
+                            var loppuVuosi = vuodet[vuodet.length - 1];
                             
                             if (props.paavo_aikasarja[alkuVuosi] && props.paavo_aikasarja[loppuVuosi] && alkuVuosi !== loppuVuosi) {{
                                 var paavoAlkuData = props.paavo_aikasarja[alkuVuosi];
                                 var paavoLoppuData = props.paavo_aikasarja[loppuVuosi];
                                 
-                                // Laske muutokset
                                 var vaestoMuutos = ((paavoLoppuData.vaesto - paavoAlkuData.vaesto) / paavoAlkuData.vaesto * 100);
                                 var ikaMuutos = paavoLoppuData.keski_ika - paavoAlkuData.keski_ika;
                                 var tuloMuutos = ((paavoLoppuData.keskitulo - paavoAlkuData.keskitulo) / paavoAlkuData.keskitulo * 100);
@@ -975,41 +2075,40 @@ html = f'''<!DOCTYPE html>
                                 var naytettavaAlku = alkuVuosi - 1;
                                 var naytettavaLoppu = loppuVuosi - 1;
                                 
-                                popupContent += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
-                                    '<strong>👥 Väestömuutokset (' + naytettavaAlku + '-' + naytettavaLoppu + ')</strong><br>' +
+                                // Suljetaan ensin details ja lisätään väestöosuus
+                                popupContent = popupContent.replace(/<\\/div>\\s*$/, '') +
+                                    '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
+                                    '<strong>' + String.fromCodePoint(0x1F465) + ' V' + String.fromCharCode(228) + 'est' + String.fromCharCode(246) + 'muutokset (' + naytettavaAlku + '-' + naytettavaLoppu + ')</strong><br>' +
                                     'Asukkaat: ' + vaestoSign + vaestoMuutos.toFixed(1) + ' %<br>' +
-                                    'Keski-ikä: ' + ikaSign + ikaMuutos.toFixed(1) + ' v<br>' +
+                                    'Keski-ik' + String.fromCharCode(228) + ': ' + ikaSign + ikaMuutos.toFixed(1) + ' v<br>' +
                                     'Keskitulo: ' + tuloSign + tuloMuutos.toFixed(1) + ' %<br>' +
-                                    'Työttömyys: ' + tyottomyysSign + tyottomyysMuutos.toFixed(1) + ' %-yks</div>';
+                                    'Ty' + String.fromCharCode(246) + 'tt' + String.fromCharCode(246) + 'myys: ' + tyottomyysSign + tyottomyysMuutos.toFixed(1) + ' %-yks</div>';
                             }}
                         }}
                         
-                        // Lisää palvelutiedot jos saatavilla
                         if (props.palvelut && Object.keys(props.palvelut).length > 0) {{
                             var palvelut = props.palvelut;
                             if (palvelut.kaupat !== undefined && palvelut.palveluindeksi > 0) {{
-                                popupContent += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
-                                    '<strong>🏪 Palvelut (postinumeroalueella):</strong><br>' +
-                                    '🛒 Kaupat: ' + palvelut.kaupat + '<br>' +
-                                    '🏫 Koulut: ' + palvelut.koulut + '<br>' +
-                                    '🧒 Päiväkodit: ' + palvelut.paivakodit + '<br>' +
-                                    '💪 Liikuntapaikat: ' + palvelut.liikuntapaikat + '<br>' +
-                                    '🏥 Terveysasemat: ' + palvelut.terveysasemat + '<br>' +
-                                    '🚌 Julk. liikenne: ' + palvelut.julkinen_liikenne + '<br>' +
-                                    '⭐ Palveluindeksi: ' + palvelut.palveluindeksi.toFixed(1) + '</div>';
+                                popupContent = popupContent.replace(/<\\/div>\\s*$/, '') +
+                                    '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
+                                    '<strong>' + String.fromCodePoint(0x1F3EA) + ' Palvelut (postinumeroalueella):</strong><br>' +
+                                    String.fromCodePoint(0x1F6D2) + ' Kaupat: ' + palvelut.kaupat + '<br>' +
+                                    String.fromCodePoint(0x1F3EB) + ' Koulut: ' + palvelut.koulut + '<br>' +
+                                    String.fromCodePoint(0x1F9D2) + ' P' + String.fromCharCode(228) + 'iv' + String.fromCharCode(228) + 'kodit: ' + palvelut.paivakodit + '<br>' +
+                                    String.fromCodePoint(0x1F4AA) + ' Liikuntapaikat: ' + palvelut.liikuntapaikat + '<br>' +
+                                    String.fromCodePoint(0x1F3E5) + ' Terveysasemat: ' + palvelut.terveysasemat + '<br>' +
+                                    String.fromCodePoint(0x1F68C) + ' Julk. liikenne: ' + palvelut.julkinen_liikenne + '<br>' +
+                                    String.fromCodePoint(0x2B50) + ' Palveluindeksi: ' + palvelut.palveluindeksi.toFixed(1) + '</div>';
                             }}
                         }}
                         
                         popupContent += '</div>';
-                    }} else {{
-                        popupContent = '<div class="popup-content">' +
-                            '<h3>' + props.postinumer + '</h3>' +
-                            '<div class="details">' + props.name + '</div>' +
-                            '<div class="details" style="color: #999; font-style: italic;">Ei riittävästi dataa trendianalyysiin</div>' +
-                            '</div>';
                     }}
-                    layer.bindPopup(popupContent);
                     
+                    popupContent = popupContent.replace(/<\\/div>$/, '<button class="ts-btn" onclick="openTimeSeriesModal()">' + String.fromCodePoint(0x1F4CA) + ' N' + String.fromCharCode(228) + 'yt' + String.fromCharCode(228) + ' aikasarja</button></div>');
+                    layer.bindPopup(popupContent, {{ maxWidth: 300 }});
+                    
+                    layer.on('click', function() {{ selectedFeature = feature; }});
                     layer.on('mouseover', function(e) {{
                         this.setStyle({{ fillOpacity: 0.9, weight: 2 }});
                     }});
@@ -1025,13 +2124,12 @@ html = f'''<!DOCTYPE html>
         
         // Luo animaatiokehys tietylle vuodelle
         function createAnimationFrame(year, buildingType, metric) {{
-            var isPrice = (metric === 'keskihinta_aritm_nw');
             
             geoJsonLayer = L.geoJSON(geojsonData, {{
                 smoothFactor: 0,
                 style: function(feature) {{
-                    var value = getValue(feature, year, buildingType, metric);
-                    var color = value ? (isPrice ? getColorPrice(value) : getColorTransactions(value)) : '#ccc';
+                    var value = getMetricValue(feature, year, buildingType, metric);
+                    var color = value ? getMetricColor(metric, value) : '#ccc';
                     return {{
                         fillColor: color,
                         fillOpacity: 0.7,
@@ -1042,19 +2140,20 @@ html = f'''<!DOCTYPE html>
                 }},
                 onEachFeature: function(feature, layer) {{
                     var props = feature.properties;
-                    var value = getValue(feature, year, buildingType, metric);
+                    var value = getMetricValue(feature, year, buildingType, metric);
                     
                     if (value) {{
-                        var metricLabel = isPrice ? 'EUR/m²' : 'kpl';
                         var popupContent = '<div class="popup-content">' +
                             '<h3>' + props.postinumer + '</h3>' +
-                            '<div class="price">' + value.toLocaleString() + ' ' + metricLabel + '</div>' +
+                            '<div class="price">' + formatMetricValue(value, metric) + '</div>' +
                             '<div class="details">' + props.name + '</div>' +
                             '<div class="details">' + year + (year == 2026 ? '*' : '') + ' | ' + buildingTypes[buildingType] + '</div>' +
+                            '<button class="ts-btn" onclick="openTimeSeriesModal()">📊 Näytä aikasarja</button>' +
                             '</div>';
-                        layer.bindPopup(popupContent);
+                        layer.bindPopup(popupContent, {{ maxWidth: 300 }});
                     }}
                     
+                    layer.on('click', function() {{ selectedFeature = feature; }});
                     layer.on('mouseover', function(e) {{
                         this.setStyle({{ fillOpacity: 0.9, weight: 2 }});
                     }});
@@ -1117,9 +2216,9 @@ html = f'''<!DOCTYPE html>
             
             geojsonData.features.forEach(function(feature) {{
                 var props = feature.properties;
-                var value = getValue(feature, year, buildingType, metric);
+                var value = getMetricValue(feature, year, buildingType, metric);
                 
-                if (value && metric === 'keskihinta_aritm_nw') {{ // Vain neliöhinnalle
+                if (value) {{
                     var postinumero = props.postinumer;
                     
                     // Suodata kaupungin mukaan
@@ -1141,7 +2240,7 @@ html = f'''<!DOCTYPE html>
                 }}
             }});
             
-            // Järjestä hinnan mukaan laskevasti ja ota top 10
+            // Järjestä arvon mukaan laskevasti ja ota top 10
             areas.sort(function(a, b) {{ return b.hinta - a.hinta; }});
             return areas.slice(0, 10);
         }}
@@ -1169,30 +2268,31 @@ html = f'''<!DOCTYPE html>
             
             // Luo HTML vaakapylväsdiagrammi
             var maxPrice = top10[0].hinta;
+            var metricTitles = {{
+                'keskihinta_aritm_nw': 'Top 10 Kalleimmat Postinumeroalueet',
+                'lkm_julk20': 'Top 10 Aktiivisimmat Postinumeroalueet',
+                'vuokratuotto': 'Top 10 Tuottoisimmat Postinumeroalueet',
+                'hinta_tulot': 'Top 10 Kalleimmat (hinta/tulot) Postinumeroalueet'
+            }};
+            var chartTitle = (metricTitles[metric] || 'Top 10') + ' - ' + year + (year == 2026 ? '*' : '');
+            var unit = getMetricUnit(metric);
             var html = '<div style="max-width: 1200px; margin: 0 auto;">';
-            html += '<h2 style="text-align: center; margin-bottom: 10px;">Top 10 Kalleimmat Postinumeroalueet - ' + year + (year == 2026 ? '*' : '') + '</h2>';
+            html += '<h2 style="text-align: center; margin-bottom: 10px;">' + chartTitle + '</h2>';
             html += '<div style="font-size: 16px; color: #1e3c72; text-align: center; margin-bottom: 10px; font-weight: bold;">' + cityName + '</div>';
             html += '<div style="font-size: 14px; color: #666; text-align: center; margin-bottom: 20px;">Huoneistotyyppi: ' + buildingTypes[buildingType] + '</div>';
             
             top10.forEach(function(area, index) {{
                 var percentage = (area.hinta / maxPrice) * 100;
-                var barColor;
-                
-                // Värikoodaus kuten kartassa
-                if (area.hinta > 8000) barColor = '#8B0000';
-                else if (area.hinta > 6000) barColor = '#e74c3c';
-                else if (area.hinta > 5000) barColor = '#f39c12';
-                else if (area.hinta > 4000) barColor = '#f1c40f';
-                else if (area.hinta > 3000) barColor = '#9acd32';
-                else if (area.hinta > 2000) barColor = '#27ae60';
-                else barColor = '#2ecc71';
+                var barColor = getMetricColor(metric, area.hinta);
+                var isDecimal = (metric === 'vuokratuotto' || metric === 'hinta_tulot');
+                var displayValue = isDecimal ? area.hinta.toFixed(1) + ' ' + unit : area.hinta.toLocaleString() + ' ' + unit;
                 
                 html += '<div style="margin-bottom: 20px;">';
                 html += '<div style="display: flex; align-items: center; margin-bottom: 5px;">';
                 html += '<div style="width: 60px; font-weight: bold; color: #333;">' + (index + 1) + '.</div>';
                 html += '<div style="width: 120px; font-weight: bold; color: #1e3c72;">' + area.postinumero + '</div>';
                 html += '<div style="flex: 1; color: #666; font-size: 14px;">' + area.nimi + '</div>';
-                html += '<div style="width: 120px; text-align: right; font-weight: bold; color: ' + barColor + ';">' + area.hinta.toLocaleString() + ' €/m²</div>';
+                html += '<div style="width: 140px; text-align: right; font-weight: bold; color: ' + barColor + ';">' + displayValue + '</div>';
                 html += '</div>';
                 html += '<div style="margin-left: 60px; background: #f0f0f0; height: 30px; border-radius: 5px; overflow: hidden;">';
                 html += '<div style="background: ' + barColor + '; height: 100%; width: ' + percentage + '%; transition: width 0.3s ease;"></div>';
@@ -1217,7 +2317,7 @@ html = f'''<!DOCTYPE html>
             document.getElementById('chart-play-button').textContent = '⏸️ Tauko';
             
             var buildingType = document.getElementById('building-type-select').value;
-            var metric = 'keskihinta_aritm_nw'; // Aina neliöhinta diagrammille
+            var metric = document.getElementById('metric-select').value;
             var city = document.getElementById('chart-city-select').value;
             var speed = parseInt(document.getElementById('chart-animation-speed').value);
             
@@ -1259,6 +2359,22 @@ html = f'''<!DOCTYPE html>
                     for (var i = 0; i < grades.length; i++) {{
                         div.innerHTML += '<div class="legend-item"><div class="legend-color" style="background:' + 
                             getColorPrice(grades[i] + 1) + '"></div>' + labels[i] + '</div>';
+                    }}
+                }} else if (metric === 'hinta_tulot') {{
+                    div.innerHTML = '<h4>Hinta/tulot (vuosia)</h4>';
+                    var grades = [0, 4, 5, 6, 8, 10, 12];
+                    var labels = ['< 4', '4-5', '5-6', '6-8', '8-10', '10-12', '> 12'];
+                    for (var i = 0; i < grades.length; i++) {{
+                        div.innerHTML += '<div class="legend-item"><div class="legend-color" style="background:' + 
+                            getColorRatio(grades[i] + 0.5) + '"></div>' + labels[i] + '</div>';
+                    }}
+                }} else if (metric === 'vuokratuotto') {{
+                    div.innerHTML = '<h4>Vuokratuotto %</h4>';
+                    var grades = [8, 7, 6, 5, 4, 3, 0];
+                    var labels = ['> 8 %', '7-8 %', '6-7 %', '5-6 %', '4-5 %', '3-4 %', '< 3 %'];
+                    for (var i = 0; i < grades.length; i++) {{
+                        div.innerHTML += '<div class="legend-item"><div class="legend-color" style="background:' + 
+                            getColorYield(grades[i] + 0.5) + '"></div>' + labels[i] + '</div>';
                     }}
                 }} else {{
                     div.innerHTML = '<h4>Kauppoja (kpl)</h4>';
@@ -1314,22 +2430,55 @@ html = f'''<!DOCTYPE html>
         
         // Päivitä tilastot
         function updateStats() {{
-            var mode = document.querySelector('input[name="mode"]:checked').value;
+            var mode = document.getElementById('view-mode-select').value;
             var buildingType = document.getElementById('building-type-select').value;
             var metric = document.getElementById('metric-select').value;
             var isPrice = (metric === 'keskihinta_aritm_nw');
-            var metricLabel = isPrice ? 'EUR/m²' : 'kpl';
+            var isYield = (metric === 'vuokratuotto');
+            var isRatio = (metric === 'hinta_tulot');
+            var metricLabel = isPrice ? 'EUR/m²' : (isYield ? '%' : (isRatio ? 'v' : 'kpl'));
             
             if (mode === 'absolute') {{
                 var selectedYear = document.getElementById('year-select').value;
                 var values = [];
                 
                 geojsonData.features.forEach(function(feature) {{
-                    var value = getValue(feature, selectedYear, buildingType, metric);
-                    if (value) values.push(value);
+                    if (isYield) {{
+                        var yv = getVuokratuotto(feature, selectedYear, buildingType);
+                        if (yv) values.push(yv);
+                    }} else if (isRatio) {{
+                        var rv = getHintaTuloSuhde(feature, selectedYear, buildingType);
+                        if (rv) values.push(rv);
+                    }} else {{
+                        var value = getValue(feature, selectedYear, buildingType, metric);
+                        if (value) values.push(value);
+                    }}
                 }});
                 
                 if (values.length > 0) {{
+                    if (isRatio) {{
+                        var avg = (values.reduce((a,b) => a + b, 0) / values.length).toFixed(1);
+                        var max = Math.max(...values).toFixed(1);
+                        var min = Math.min(...values).toFixed(1);
+                        
+                        document.getElementById('stat-label').textContent = 'Keskiarvo ' + selectedYear;
+                        document.getElementById('stat-value').textContent = avg + ' v';
+                        document.getElementById('stat-max-label').textContent = 'Kallein';
+                        document.getElementById('stat-max').textContent = max + ' v';
+                        document.getElementById('stat-min-label').textContent = 'Edullisin';
+                        document.getElementById('stat-min').textContent = min + ' v';
+                    }} else if (isYield) {{
+                        var avg = (values.reduce((a,b) => a + b, 0) / values.length).toFixed(1);
+                        var max = Math.max(...values).toFixed(1);
+                        var min = Math.min(...values).toFixed(1);
+                        
+                        document.getElementById('stat-label').textContent = 'Keskituotto ' + selectedYear;
+                        document.getElementById('stat-value').textContent = avg + ' %';
+                        document.getElementById('stat-max-label').textContent = 'Korkein';
+                        document.getElementById('stat-max').textContent = max + ' %';
+                        document.getElementById('stat-min-label').textContent = 'Matalin';
+                        document.getElementById('stat-min').textContent = min + ' %';
+                    }} else {{
                     var avg = Math.round(values.reduce((a,b) => a + b, 0) / values.length);
                     var max = Math.max(...values);
                     var min = Math.min(...values);
@@ -1340,6 +2489,7 @@ html = f'''<!DOCTYPE html>
                     document.getElementById('stat-max').textContent = max.toLocaleString() + ' ' + metricLabel;
                     document.getElementById('stat-min-label').textContent = isPrice ? 'Halvin' : 'Pienin';
                     document.getElementById('stat-min').textContent = min.toLocaleString() + ' ' + metricLabel;
+                    }}
                 }}
             }} else {{
                 var yearFrom = document.getElementById('year-from').value;
@@ -1347,8 +2497,8 @@ html = f'''<!DOCTYPE html>
                 var changes = [];
                 
                 geojsonData.features.forEach(function(feature) {{
-                    var valueFrom = getValue(feature, yearFrom, buildingType, metric);
-                    var valueTo = getValue(feature, yearTo, buildingType, metric);
+                    var valueFrom = getMetricValue(feature, yearFrom, buildingType, metric);
+                    var valueTo = getMetricValue(feature, yearTo, buildingType, metric);
                     if (valueFrom && valueTo && valueFrom > 0) {{
                         var change = ((valueTo - valueFrom) / valueFrom) * 100;
                         changes.push(change);
@@ -1383,6 +2533,295 @@ html = f'''<!DOCTYPE html>
                     layer.setStyle({{opacity: 1, fillOpacity: 0.7}});
                 }} else {{
                     layer.setStyle({{opacity: 0.1, fillOpacity: 0.1}});
+                }}
+            }});
+        }}
+        
+        // Top 10 -paneeli
+        var currentTop10Tab = 'kalleimmat';
+        
+        function toggleTop10Panel() {{
+            var panel = document.getElementById('top10-panel');
+            if (panel.style.display === 'block') {{
+                closeTop10Panel();
+            }} else {{
+                panel.style.display = 'block';
+                renderTop10List(currentTop10Tab);
+            }}
+        }}
+        
+        function closeTop10Panel() {{
+            document.getElementById('top10-panel').style.display = 'none';
+        }}
+        
+        function switchTop10Tab(el) {{
+            document.querySelectorAll('.top10-tab').forEach(function(t) {{ t.classList.remove('active'); }});
+            el.classList.add('active');
+            currentTop10Tab = el.getAttribute('data-list');
+            renderTop10List(currentTop10Tab);
+        }}
+        
+        function getTop10Data(listType) {{
+            var year = document.getElementById('year-select').value;
+            var bt = document.getElementById('building-type-select').value;
+            var items = [];
+            
+            geojsonData.features.forEach(function(feature) {{
+                var props = feature.properties;
+                var postcode = props.postinumer;
+                var name = props.name;
+                
+                if (listType === 'kalleimmat' || listType === 'halvimmat') {{
+                    var price = getValue(feature, year, bt, 'keskihinta_aritm_nw');
+                    if (price) items.push({{ zip: postcode, name: name, value: price, label: price.toLocaleString() + ' \u20ac/m\u00b2', feature: feature }});
+                }} else if (listType === 'nousseet' || listType === 'laskeneet') {{
+                    var prevYear = (parseInt(year) - 5).toString();
+                    var pFrom = getValue(feature, prevYear, bt, 'keskihinta_aritm_nw');
+                    var pTo = getValue(feature, year, bt, 'keskihinta_aritm_nw');
+                    if (pFrom && pTo && pFrom > 0) {{
+                        var change = ((pTo - pFrom) / pFrom) * 100;
+                        items.push({{ zip: postcode, name: name, value: change, label: (change >= 0 ? '+' : '') + change.toFixed(1) + ' %', feature: feature }});
+                    }}
+                }} else if (listType === 'tuotto') {{
+                    var yv = getVuokratuotto(feature, year, bt);
+                    if (yv) items.push({{ zip: postcode, name: name, value: yv, label: yv.toFixed(1) + ' %', feature: feature }});
+                }} else if (listType === 'palvelut') {{
+                    if (props.palvelut && props.palvelut.palveluindeksi > 0) {{
+                        items.push({{ zip: postcode, name: name, value: props.palvelut.palveluindeksi, label: props.palvelut.palveluindeksi.toFixed(1), feature: feature }});
+                    }}
+                }}
+            }});
+            
+            // Lajittelu
+            if (listType === 'halvimmat' || listType === 'laskeneet') {{
+                items.sort(function(a, b) {{ return a.value - b.value; }});
+            }} else {{
+                items.sort(function(a, b) {{ return b.value - a.value; }});
+            }}
+            
+            return items.slice(0, 10);
+        }}
+        
+        function renderTop10List(listType) {{
+            var items = getTop10Data(listType);
+            var titles = {{
+                'kalleimmat': String.fromCodePoint(0x1F48E) + ' Kalleimmat alueet',
+                'halvimmat': String.fromCodePoint(0x1F49A) + ' Halvimmat alueet',
+                'nousseet': String.fromCodePoint(0x1F4C8) + ' Eniten nousseet (5v)',
+                'laskeneet': String.fromCodePoint(0x1F4C9) + ' Eniten laskeneet (5v)',
+                'tuotto': String.fromCodePoint(0x1F4B0) + ' Paras vuokratuotto',
+                'palvelut': String.fromCodePoint(0x1F3EA) + ' Parhaat palvelut'
+            }};
+            var colorFns = {{
+                'kalleimmat': function(v) {{ return getColorPrice(v); }},
+                'halvimmat': function(v) {{ return getColorPrice(v); }},
+                'nousseet': function(v) {{ return getColorChange(v); }},
+                'laskeneet': function(v) {{ return getColorChange(v); }},
+                'tuotto': function(v) {{ return getColorYield(v); }},
+                'palvelut': function() {{ return '#f39c12'; }}
+            }};
+            
+            var year = document.getElementById('year-select').value;
+            var yearLabel = (listType === 'palvelut') ? 'OSM 2025' : year;
+            var html = '<div style="padding: 5px 0 10px; font-size: 12px; color: #888;">' + titles[listType] + ' (' + yearLabel + ')</div>';
+            
+            if (items.length === 0) {{
+                html += '<div style="text-align:center; padding: 30px; color: #999;">Ei dataa t\u00e4lle valinnalle</div>';
+            }} else {{
+                items.forEach(function(item, i) {{
+                    var color = colorFns[listType](item.value);
+                    var q = String.fromCharCode(39);
+                    html += '<div class="top10-item" onclick="zoomToArea(' + q + item.zip + q + ')">' +
+                        '<div class="top10-rank">' + (i + 1) + '.</div>' +
+                        '<div class="top10-info"><span class="top10-zip">' + item.zip + '</span> <span class="top10-name">' + item.name + '</span></div>' +
+                        '<div class="top10-value" style="color:' + color + '">' + item.label + '</div></div>';
+                }});
+            }}
+            
+            document.getElementById('top10-list').innerHTML = html;
+        }}
+        
+        function zoomToArea(postcode) {{
+            geoJsonLayer.eachLayer(function(layer) {{
+                if (layer.feature.properties.postinumer === postcode) {{
+                    map.fitBounds(layer.getBounds(), {{ maxZoom: 14 }});
+                    layer.openPopup();
+                    selectedFeature = layer.feature;
+                }}
+            }});
+            closeTop10Panel();
+        }}
+        
+        // Paras alue -hakutyökalu
+        var finderHighlightLayers = [];
+        
+        function toggleFinderPanel() {{
+            var panel = document.getElementById('finder-panel');
+            if (panel.style.display === 'block') {{
+                closeFinderPanel();
+            }} else {{
+                panel.style.display = 'block';
+            }}
+        }}
+        
+        function closeFinderPanel() {{
+            document.getElementById('finder-panel').style.display = 'none';
+        }}
+        
+        function resetFinderSearch() {{
+            document.getElementById('finder-kunta').value = 'all';
+            document.getElementById('finder-building-type').value = '0';
+            document.getElementById('finder-max-price').value = 4000;
+            document.getElementById('finder-price-val').textContent = '4000 \u20ac/m\u00b2';
+            document.getElementById('finder-min-pop').value = 0;
+            document.getElementById('finder-pop-val').textContent = 'Ei rajoitusta';
+            document.getElementById('finder-min-palvelu').value = 0;
+            document.getElementById('finder-palvelu-val').textContent = 'Ei rajoitusta';
+            document.getElementById('finder-kaupat').checked = false;
+            document.getElementById('finder-koulut').checked = false;
+            document.getElementById('finder-paivakodit').checked = false;
+            document.getElementById('finder-liikunta').checked = false;
+            document.getElementById('finder-terveys').checked = false;
+            document.getElementById('finder-liikenne').checked = false;
+            document.getElementById('finder-results').innerHTML = '';
+            // Palauta kartan tyylit
+            clearFinderHighlight();
+        }}
+        
+        function clearFinderHighlight() {{
+            if (geoJsonLayer) {{
+                geoJsonLayer.eachLayer(function(layer) {{
+                    geoJsonLayer.resetStyle(layer);
+                }});
+            }}
+        }}
+        
+        function runFinderSearch() {{
+            var kunta = document.getElementById('finder-kunta').value;
+            var bt = document.getElementById('finder-building-type').value;
+            var maxPrice = parseFloat(document.getElementById('finder-max-price').value);
+            var minPop = parseInt(document.getElementById('finder-min-pop').value);
+            var minPalvelu = parseFloat(document.getElementById('finder-min-palvelu').value);
+            
+            var reqKaupat = document.getElementById('finder-kaupat').checked;
+            var reqKoulut = document.getElementById('finder-koulut').checked;
+            var reqPaivakodit = document.getElementById('finder-paivakodit').checked;
+            var reqLiikunta = document.getElementById('finder-liikunta').checked;
+            var reqTerveys = document.getElementById('finder-terveys').checked;
+            var reqLiikenne = document.getElementById('finder-liikenne').checked;
+            
+            var year = document.getElementById('year-select').value;
+            var results = [];
+            
+            geojsonData.features.forEach(function(feature) {{
+                var props = feature.properties;
+                
+                // Kuntasuodatin
+                if (kunta !== 'all' && props.city !== kunta) return;
+                
+                // Hintasuodatin
+                var price = getValue(feature, year, bt, 'keskihinta_aritm_nw');
+                if (!price || price > maxPrice) return;
+                
+                // Väkiluku
+                var paavo = props.paavo;
+                var pop = paavo ? (paavo.vaesto || 0) : 0;
+                if (minPop > 0 && pop < minPop) return;
+                
+                // Palvelut
+                var palvelut = props.palvelut || {{}};
+                if (reqKaupat && (!palvelut.kaupat || palvelut.kaupat < 1)) return;
+                if (reqKoulut && (!palvelut.koulut || palvelut.koulut < 1)) return;
+                if (reqPaivakodit && (!palvelut.paivakodit || palvelut.paivakodit < 1)) return;
+                if (reqLiikunta && (!palvelut.liikuntapaikat || palvelut.liikuntapaikat < 1)) return;
+                if (reqTerveys && (!palvelut.terveysasemat || palvelut.terveysasemat < 1)) return;
+                if (reqLiikenne && (!palvelut.julkinen_liikenne || palvelut.julkinen_liikenne < 1)) return;
+                
+                // Palveluindeksi
+                var pIdx = palvelut.palveluindeksi || 0;
+                if (minPalvelu > 0 && pIdx < minPalvelu) return;
+                
+                results.push({{
+                    zip: props.postinumer,
+                    name: props.name,
+                    city: props.city || '',
+                    price: price,
+                    pop: pop,
+                    palveluindeksi: pIdx,
+                    feature: feature
+                }});
+            }});
+            
+            // Järjestä ensin palveluindeksin, sitten halvimman hinnan mukaan
+            results.sort(function(a, b) {{
+                // Ensin palveluindeksin mukaan (paras ensin)
+                if (b.palveluindeksi !== a.palveluindeksi) return b.palveluindeksi - a.palveluindeksi;
+                // Sitten halvempi ensin
+                return a.price - b.price;
+            }});
+            
+            // Korosta sopivat alueet kartalla
+            highlightFinderResults(results);
+            
+            // Näytä tulokset
+            var html = '<div class="finder-results-header">' + results.length + ' sopivaa aluetta</div>';
+            
+            if (results.length === 0) {{
+                html += '<div style="text-align:center; padding: 30px; color: #999;">Ei alueita n\u00e4ill\u00e4 suodattimilla.<br>Kokeile nostaa max-hintaa tai v\u00e4hent\u00e4\u00e4 palveluvaatimuksia.</div>';
+            }} else {{
+                var showCount = Math.min(results.length, 50);
+                for (var i = 0; i < showCount; i++) {{
+                    var r = results[i];
+                    var q = String.fromCharCode(39);
+                    html += '<div class="finder-result-item" onclick="zoomToFinderArea(' + q + r.zip + q + ')">' +
+                        '<div class="finder-result-rank">' + (i + 1) + '.</div>' +
+                        '<div class="finder-result-info">' +
+                        '<span class="fr-zip">' + r.zip + '</span> <span class="fr-name">' + r.name + '</span>' +
+                        '<div class="fr-city">' + r.city + (r.pop > 0 ? ' | ' + r.pop.toLocaleString() + ' as.' : '') + '</div>' +
+                        '</div>' +
+                        '<div class="finder-result-value">' +
+                        '<div class="fr-price">' + r.price.toLocaleString() + ' \u20ac/m\u00b2</div>' +
+                        '<div class="fr-services">' + (r.palveluindeksi > 0 ? '\u2b50 ' + r.palveluindeksi.toFixed(1) : '') + '</div>' +
+                        '</div></div>';
+                }}
+                if (results.length > 50) {{
+                    html += '<div style="text-align:center; padding: 10px; color: #888; font-size: 12px;">N\u00e4ytet\u00e4\u00e4n 50 / ' + results.length + ' tulosta</div>';
+                }}
+            }}
+            
+            document.getElementById('finder-results').innerHTML = html;
+        }}
+        
+        function highlightFinderResults(results) {{
+            var matchZips = {{}};
+            results.forEach(function(r) {{ matchZips[r.zip] = true; }});
+            
+            geoJsonLayer.eachLayer(function(layer) {{
+                var zip = layer.feature.properties.postinumer;
+                if (matchZips[zip]) {{
+                    layer.setStyle({{
+                        fillColor: '#27ae60',
+                        fillOpacity: 0.7,
+                        color: '#1a7a42',
+                        weight: 2,
+                        opacity: 1
+                    }});
+                }} else {{
+                    layer.setStyle({{
+                        fillOpacity: 0.08,
+                        opacity: 0.2,
+                        weight: 0.5
+                    }});
+                }}
+            }});
+        }}
+        
+        function zoomToFinderArea(postcode) {{
+            geoJsonLayer.eachLayer(function(layer) {{
+                if (layer.feature.properties.postinumer === postcode) {{
+                    map.fitBounds(layer.getBounds(), {{ maxZoom: 14 }});
+                    layer.openPopup();
+                    selectedFeature = layer.feature;
                 }}
             }});
         }}

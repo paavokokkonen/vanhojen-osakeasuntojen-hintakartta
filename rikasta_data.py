@@ -12,6 +12,7 @@ import requests
 import json
 import time
 import os
+import math
 from xml.etree import ElementTree as ET
 from shapely.geometry import shape, Point
 from shapely.ops import nearest_points
@@ -363,6 +364,8 @@ def hae_palvelut_osm_geofabrik(postinumero_geometriat, osm_tiedosto='finland-lat
         print(f"\n   [OK] Kasitelty {handler.kasitelty:,} nodea")
         
         # Laske palveluindeksi jokaiselle alueelle
+        # Käytetään tiheyttä (palvelut/km²) ja logaritmista skaalausta
+        # jotta suurten maaseutualueiden raakamäärät eivät dominoi
         painot = {
             'kaupat': 1.0,
             'koulut': 1.5,
@@ -372,12 +375,23 @@ def hae_palvelut_osm_geofabrik(postinumero_geometriat, osm_tiedosto='finland-lat
             'julkinen_liikenne': 0.5
         }
         
+        # Laske alueiden pinta-alat km²
+        alueen_alat = {}
+        for pno, geom in postinumero_geometriat.items():
+            centroid = geom.centroid
+            lat_rad = math.radians(centroid.y)
+            lat_factor = 111320  # m per degree lat
+            lon_factor = 111320 * math.cos(lat_rad)  # m per degree lon
+            area_km2 = geom.area * lat_factor * lon_factor / 1_000_000
+            alueen_alat[pno] = max(area_km2, 0.01)  # Min 0.01 km² nollalla jaon esto
+        
         alueet_palveluilla = 0
         for pno, palvelut in handler.palvelut.items():
+            area = alueen_alat.get(pno, 1.0)
             palveluindeksi = sum(
-                palvelut[k] * painot[k] for k in palvelut.keys()
+                math.log(1 + palvelut[k] / area) * painot[k] for k in palvelut.keys()
             )
-            palvelut['palveluindeksi'] = round(palveluindeksi, 1)
+            palvelut['palveluindeksi'] = round(palveluindeksi, 2)
             
             if palveluindeksi > 0:
                 alueet_palveluilla += 1
