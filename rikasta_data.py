@@ -22,7 +22,7 @@ try:
     OSMIUM_AVAILABLE = True
 except ImportError:
     OSMIUM_AVAILABLE = False
-    print("⚠️  osmium ei asennettu. Palvelutietojen haku ohitetaan.")
+    print("[WARNING] osmium ei asennettu. Palvelutietojen haku ohitetaan.")
     print("   Asenna: pip install osmium")
 
 def hae_paavo_data():
@@ -212,11 +212,11 @@ def lataa_osm_tiedosto(tiedostonimi='finland-latest.osm.pbf'):
                         print(f"   Ladattu: {progress:.1f}% ({downloaded/(1024*1024):.1f} MB)")
         
         final_size = os.path.getsize(tiedostonimi) / (1024 * 1024)
-        print(f"   ✅ Lataus valmis: {tiedostonimi} ({final_size:.1f} MB)")
+        print(f"   [OK] Lataus valmis: {tiedostonimi} ({final_size:.1f} MB)")
         return tiedostonimi
         
     except Exception as e:
-        print(f"   ❌ Lataus epäonnistui: {e}")
+        print(f"   [ERROR] Lataus epäonnistui: {e}")
         print(f"   Voit ladata tiedoston manuaalisesti:")
         print(f"   https://download.geofabrik.de/europe/finland-latest.osm.pbf")
         if os.path.exists(tiedostonimi):
@@ -224,68 +224,70 @@ def lataa_osm_tiedosto(tiedostonimi='finland-latest.osm.pbf'):
         return None
 
 
-class PalveluHandler(osmium.SimpleHandler):
-    """
-    Osmium handler joka kerää palvelutiedot kaikilta postinumeroalueilta
-    Käyttää postinumeroalueiden tarkkoja geometrioita (point-in-polygon)
-    """
-    def __init__(self, postinumero_geometriat):
-        super().__init__()
-        self.postinumero_geometriat = postinumero_geometriat
+# Määritellään PalveluHandler vain jos osmium on saatavilla
+if OSMIUM_AVAILABLE:
+    class PalveluHandler(osmium.SimpleHandler):
+        """
+        Osmium handler joka kerää palvelutiedot kaikilta postinumeroalueilta
+        Käyttää postinumeroalueiden tarkkoja geometrioita (point-in-polygon)
+        """
+        def __init__(self, postinumero_geometriat):
+            super().__init__()
+            self.postinumero_geometriat = postinumero_geometriat
+            
+            # Alusta palvelulaskurit jokaiselle alueelle
+            self.palvelut = {}
+            for pno in postinumero_geometriat.keys():
+                self.palvelut[pno] = {
+                    'kaupat': 0,
+                    'koulut': 0,
+                    'paivakodit': 0,
+                    'liikuntapaikat': 0,
+                    'terveysasemat': 0,
+                    'julkinen_liikenne': 0
+                }
+            
+            self.kasitelty = 0
         
-        # Alusta palvelulaskurit jokaiselle alueelle
-        self.palvelut = {}
-        for pno in postinumero_geometriat.keys():
-            self.palvelut[pno] = {
-                'kaupat': 0,
-                'koulut': 0,
-                'paivakodit': 0,
-                'liikuntapaikat': 0,
-                'terveysasemat': 0,
-                'julkinen_liikenne': 0
-            }
-        
-        self.kasitelty = 0
-    
-    def node(self, n):
-        """Käsitellään jokainen OSM-node"""
-        # Ohita nodet ilman tageja
-        if not n.tags:
-            return
-        
-        self.kasitelty += 1
-        if self.kasitelty % 100000 == 0:
-            print(f"\r   Käsitelty {self.kasitelty:,} nodea...", end='')
-        
-        node_lat = n.location.lat
-        node_lon = n.location.lon
-        point = Point(node_lon, node_lat)  # Shapely käyttää (lon, lat) järjestystä
-        
-        # Tarkista mihin palveluluokkaan kuuluu
-        tags = {tag.k: tag.v for tag in n.tags}
-        palvelutyyppi = None
-        
-        if tags.get('shop') in ['supermarket', 'convenience']:
-            palvelutyyppi = 'kaupat'
-        elif tags.get('amenity') == 'school':
-            palvelutyyppi = 'koulut'
-        elif tags.get('amenity') == 'kindergarten':
-            palvelutyyppi = 'paivakodit'
-        elif tags.get('leisure') in ['fitness_centre', 'sports_centre']:
-            palvelutyyppi = 'liikuntapaikat'
-        elif tags.get('amenity') in ['doctors', 'clinic', 'hospital']:
-            palvelutyyppi = 'terveysasemat'
-        elif tags.get('highway') == 'bus_stop' or tags.get('railway') in ['station', 'tram_stop', 'halt']:
-            palvelutyyppi = 'julkinen_liikenne'
-        
-        if not palvelutyyppi:
-            return
-        
-        # Tarkista mihin postinumeroalueeseen piste kuuluu (point-in-polygon)
-        for pno, geom in self.postinumero_geometriat.items():
-            if point.within(geom):
-                self.palvelut[pno][palvelutyyppi] += 1
-                break  # Piste voi kuulua vain yhteen alueeseen
+        def node(self, n):
+            """Käsitellään jokainen OSM-node"""
+            # Ohita nodet ilman tageja
+            if not n.tags:
+                return
+            
+            self.kasitelty += 1
+            if self.kasitelty % 100000 == 0:
+                print(f"\r   Käsitelty {self.kasitelty:,} nodea...", end='')
+            
+            node_lat = n.location.lat
+            node_lon = n.location.lon
+            point = Point(node_lon, node_lat)  # Shapely käyttää (lon, lat) järjestystä
+            
+            # Tarkista mihin palveluluokkaan kuuluu
+            tags = {tag.k: tag.v for tag in n.tags}
+            palvelutyyppi = None
+            
+            if tags.get('shop') in ['supermarket', 'convenience']:
+                palvelutyyppi = 'kaupat'
+            elif tags.get('amenity') == 'school':
+                palvelutyyppi = 'koulut'
+            elif tags.get('amenity') == 'kindergarten':
+                palvelutyyppi = 'paivakodit'
+            elif tags.get('leisure') in ['fitness_centre', 'sports_centre']:
+                palvelutyyppi = 'liikuntapaikat'
+            elif tags.get('amenity') in ['doctors', 'clinic', 'hospital']:
+                palvelutyyppi = 'terveysasemat'
+            elif tags.get('highway') == 'bus_stop' or tags.get('railway') in ['station', 'tram_stop', 'halt']:
+                palvelutyyppi = 'julkinen_liikenne'
+            
+            if not palvelutyyppi:
+                return
+            
+            # Tarkista mihin postinumeroalueeseen piste kuuluu (point-in-polygon)
+            for pno, geom in self.postinumero_geometriat.items():
+                if point.within(geom):
+                    self.palvelut[pno][palvelutyyppi] += 1
+                    break  # Piste voi kuulua vain yhteen alueeseen
 
 
 def lataa_postinumeroalueiden_geometriat(geojson_file='postinumerot_hinnat.geojson'):
@@ -301,7 +303,7 @@ def lataa_postinumeroalueiden_geometriat(geojson_file='postinumerot_hinnat.geojs
     print(f"\nLadataan postinumeroalueiden geometrioita...")
     
     if not os.path.exists(geojson_file):
-        print(f"   ❌ Tiedostoa ei löydy: {geojson_file}")
+        print(f"   [ERROR] Tiedostoa ei loydy: {geojson_file}")
         return {}
     
     try:
@@ -311,7 +313,7 @@ def lataa_postinumeroalueiden_geometriat(geojson_file='postinumerot_hinnat.geojs
         geometriat = {}
         for feature in geojson_data.get('features', []):
             props = feature.get('properties', {})
-            postinumero = props.get('postinumero')
+            postinumero = props.get('postinumer')  # Korjattu: WFS API käyttää 'postinumer'-kenttää
             
             if postinumero and 'geometry' in feature:
                 # Muunna GeoJSON geometria shapely geometriaksi
@@ -322,7 +324,7 @@ def lataa_postinumeroalueiden_geometriat(geojson_file='postinumerot_hinnat.geojs
         return geometriat
         
     except Exception as e:
-        print(f"   ❌ Virhe geometrioiden latauksessa: {e}")
+        print(f"   [ERROR] Virhe geometrioiden latauksessa: {e}")
         return {}
 
 
@@ -338,7 +340,7 @@ def hae_palvelut_osm_geofabrik(postinumero_geometriat, osm_tiedosto='finland-lat
         dict: palvelutiedot per postinumero
     """
     if not OSMIUM_AVAILABLE:
-        print("   ⚠️  osmium ei käytettävissä, ohitetaan palvelutiedot")
+        print("   [WARNING] osmium ei kaytettavissa, ohitetaan palvelutiedot")
         return {}
     
     print(f"\nHaetaan palvelutietoja OSM-datasta...")
@@ -349,7 +351,7 @@ def hae_palvelut_osm_geofabrik(postinumero_geometriat, osm_tiedosto='finland-lat
     
     # Tarkista että tiedosto on olemassa
     if not os.path.exists(osm_tiedosto):
-        print(f"   ❌ Tiedostoa ei löydy: {osm_tiedosto}")
+        print(f"   [ERROR] Tiedostoa ei loydy: {osm_tiedosto}")
         return {}
     
     # Luo handler ja parsita tiedosto
@@ -358,7 +360,7 @@ def hae_palvelut_osm_geofabrik(postinumero_geometriat, osm_tiedosto='finland-lat
     try:
         print(f"   Parsitaan OSM-tiedosto...")
         handler.apply_file(osm_tiedosto)
-        print(f"\n   ✅ Käsitelty {handler.kasitelty:,} nodea")
+        print(f"\n   [OK] Kasitelty {handler.kasitelty:,} nodea")
         
         # Laske palveluindeksi jokaiselle alueelle
         painot = {
@@ -380,12 +382,12 @@ def hae_palvelut_osm_geofabrik(postinumero_geometriat, osm_tiedosto='finland-lat
             if palveluindeksi > 0:
                 alueet_palveluilla += 1
         
-        print(f"   Alueita joilla palveluita: {alueet_palveluilla}/{len(postinumerokoordinaatit)}")
+        print(f"   Alueita joilla palveluita: {alueet_palveluilla}/{len(postinumero_geometriat)}")
         
         return handler.palvelut
         
     except Exception as e:
-        print(f"   ❌ Virhe parsinnassa: {e}")
+        print(f"   [ERROR] Virhe parsinnassa: {e}")
         return {}
 
 
@@ -438,20 +440,20 @@ def main():
         osm_tiedosto = lataa_osm_tiedosto('finland-latest.osm.pbf')
         
         if osm_tiedosto:
-            print(f"   ✅ OSM-tiedosto valmis: {osm_tiedosto}")
+            print(f"   [OK] OSM-tiedosto valmis: {osm_tiedosto}")
             palvelut = hae_palvelut_osm_geofabrik(
                 postinumero_geometriat, 
                 osm_tiedosto=osm_tiedosto
             )
         else:
-            print(f"   ❌ OSM-tiedoston lataus epäonnistui!")
-            print(f"   ⚠️  Jatketaan ilman palvelutietoja")
+            print(f"   [ERROR] OSM-tiedoston lataus epaonnistui!")
+            print(f"   [WARNING] Jatketaan ilman palvelutietoja")
     else:
         if not OSMIUM_AVAILABLE:
-            print("\n⚠️  Palvelutietojen haku ohitettu (osmium ei asennettu)")
-            print(f"   Yritä: pip install osmium")
+            print("\n[WARNING] Palvelutietojen haku ohitettu (osmium ei asennettu)")
+            print(f"   Yrita: pip install osmium")
         elif not postinumero_geometriat:
-            print("\n⚠️  Palvelutietojen haku ohitettu (geometriat puuttuvat)")
+            print("\n[WARNING] Palvelutietojen haku ohitettu (geometriat puuttuvat)")
             print(f"   Geometrioita: {len(postinumero_geometriat) if postinumero_geometriat else 0}")
     
     # 6. Yhdistä kaikki data
@@ -472,17 +474,17 @@ def main():
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(rikastettu_data, f, ensure_ascii=False, indent=2)
     
-    print(f"\n✅ Rikastettu data tallennettu: {output_file}")
+    print(f"\n[OK] Rikastettu data tallennettu: {output_file}")
     print(f"   Postinumeroalueita: {len(rikastettu_data)}")
     print(f"   - Paavo-tiedot: {len(paavo_data)}")
-    print(f"   - Etäisyydet: {len(etaisyydet)}")
+    print(f"   - Etaisyydet: {len(etaisyydet)}")
     if palvelut:
         alueet_palveluilla = sum(1 for p in palvelut.values() if p.get('palveluindeksi', 0) > 0)
         print(f"   - Palvelut: {len(palvelut)} ({alueet_palveluilla} alueella dataa)")
-        print(f"   ✅ PALVELUTIEDOT MUKANA")
+        print(f"   [OK] PALVELUTIEDOT MUKANA")
     else:
         print(f"   - Palvelut: 0 (ei dataa)")
-        print(f"   ⚠️  PALVELUTIEDOT PUUTTUVAT - kartta ilman palveluita!")
+        print(f"   [WARNING] PALVELUTIEDOT PUUTTUVAT - kartta ilman palveluita!")
     print("="*60)
 
 
