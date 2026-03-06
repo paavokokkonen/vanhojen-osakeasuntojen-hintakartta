@@ -42,6 +42,9 @@ Interaktiivinen kartta Suomen asuntojen keskihinnoista ja kauppamääristä post
   - Alueilla ilman kauppoja: "Ei kauppoja" -ilmoitus
   - Absoluuttisessa näkymässä: väestötiedot (väkiluku, keski-ikä, keskitulo, työttömyysaste) + palvelutiedot
   - Analyysissa: 5 vuoden muutokset hinnoissa ja väestötiedoissa + palvelutiedot
+  - **Laajennetut Paavo-tiedot:** ikärakenne (lapset/työikäiset/eläkeikäiset %), asuntorakenne (kerrostalo%, keskipinta-ala, omistus/vuokra%), koulutus & työ (korkeakoulutetut%, ICT%, palveluala%)
+  - **Matka-aika keskustaan:** lähimmän keskustan nimi, minuutit, kilometrit, kulkutapa
+  - **Laajennetut palvelut:** 9 kategoriaa (+ ravintolat, kahvilat, puistot)
 - **Hakutoiminto** postinumeroalueille
 - **Kaupunkinavigointi** (Helsinki, Espoo, Vantaa, Tampere, Turku, Oulu, Kuopio)
 - **Dynaamiset tilastot** valituista parametreista
@@ -102,17 +105,36 @@ Interaktiivinen kartta Suomen asuntojen keskihinnoista ja kauppamääristä post
 ### 🔮 Ennusteet ja mallit
 - **Oletuksena viimeisin datavuosi (2025)** - Kartta aukeaa vuoteen 2025, joka on viimeisin Tilastokeskuksen julkaisema datavuosi
 - **Ennustevuosi (2026*) valittavissa erikseen** - Käyttäjän on valittava aktiivisesti vuosi 2026 nähdäkseen ennusteet
-- **Kolme ennustemallia** vuodelle 2026:
+- **Neljä ennustemallia** vuodelle 2026:
   - **Lineaarinen trendi** - Yksinkertainen keskimääräinen vuosimuutos (5 vuoden historia)
   - **ARIMA** - AutoRegressive Integrated Moving Average, aikasarja-analyysi
   - **Exponential Smoothing** - Holt's exponential smoothing -menetelmä
+  - **SARIMAX-Euribor** - SARIMAX(1,1,1) 12 kk Euribor-korko eksogenisenä muuttujana (ECB data 2005–2026) — *uusi 6.3.2026*
 - **Interaktiivinen mallivalinta** - Valitse ennustemalli pudotusvalikosta kun tarkastelet vuotta 2026*
 - **Kattavat ennusteet**:
   - Linear: ~3000 ennustetta
   - ARIMA: ~2700 ennustetta (vaatii riittävästi dataa)
   - Exponential Smoothing: ~3000 ennustetta
+  - SARIMAX-Euribor: ~2700 ennustetta
 - **Visuaalinen erottelu** tähdellä (*) ennustevuodesta
 - **Mallivertailu** - Näe miten eri mallit ennustavat samalle alueelle
+
+### 🚌 Matka-aika keskustaan
+- **Datalähde:** Digitransit Routing API v2 (julkinen liikenne) tai laskennallinen Haversine-arvio (auto)
+- **Keskustat:** Helsinki, Tampere, Turku, Oulu, Kuopio, Jyväskylä, Lahti
+- **Logiikka:** Jokaiselle postinumeroalueelle lasketaan matka-aika lähimpään kaupunkikeskustaan
+- **Kulkutapa näkyvissä:** Popup näyttää onko kyseessä julkisen liikenteen aika (Digitransit) vai laskennallinen arvio (auto, kaava: 10 + km × 2.5 min)
+- **Värikoodaus popupissa:** 🟢 ≤20 min, 🟡 ≤45 min, 🟠 ≤90 min, 🔴 >90 min
+- **Kattavuus:** 1723 postinumeroaluetta
+- **Finder-integraatio:** "Paras alue" -hakutyökalussa matka-aika-suodatin (0–120 min liukusäädin)
+
+### 📈 Euribor-aikasarja
+- **Datalähde:** ECB Statistical Data Warehouse (12 kk Euribor)
+- **Aikasarja:** 2005–2026 (254 kuukausidatapistettä, 22 vuosikeskiarvoa)
+- **Käyttö:**
+  - SARIMAX-ennustemallissa eksogenisenä muuttujana
+  - Aikasarjakaaviossa: Hinta vs. Euribor -kaksoisakselikuvio
+- **URL:** `https://data-api.ecb.europa.eu/service/data/FM/M.U2.EUR.RT.MM.EURIBOR1YD_.HSTA`
 
 ## Asennus
 
@@ -145,10 +167,16 @@ python rikasta_data.py
 # 4. Laske 5 vuoden trendianalyysi
 python laske_trendianalyysi.py
 
-# 5. Laske edistyneet ennustemallit (ARIMA, Exponential Smoothing)
+# 5. Laske edistyneet ennustemallit (ARIMA, Exponential Smoothing, SARIMAX-Euribor)
 python laske_ennusteet.py
 
-# 6. Luo interaktiivinen kartta
+# 6. Lataa matka-ajat keskustaan (Digitransit API tai laskennallinen arvio)
+python lataa_matka_ajat.py
+
+# 7. Lataa 12 kk Euribor-aikasarja (ECB Statistical Data Warehouse)
+python lataa_euribor.py
+
+# 8. Luo interaktiivinen kartta
 python kartta_polygon.py
 ```
 
@@ -158,7 +186,9 @@ Avaa `kartta.html` selaimessa.
 - Vaiheet 1-5 hakevat dataa verkosta tai laskevat ennusteita
 - `asuntohinnat.py` kestää ~1-2 min (StatFin API)
 - `rikasta_data.py` kestää ~5-10 min (Paavo WFS API + OSM-datan lataus ~676 MB + parsing 1.7M nodea)
-- `laske_ennusteet.py` kestää ~2-3 min (ARIMA ja Exponential Smoothing mallit)
+- `laske_ennusteet.py` kestää ~5-20 min (ARIMA, Exponential Smoothing ja SARIMAX-Euribor mallit)
+- `lataa_matka_ajat.py` kestää ~1-2 min (laskennallinen arvio) tai ~30-60 min (Digitransit API)
+- `lataa_euribor.py` kestää ~5 s (ECB API)
 - `kartta_polygon.py` generoi kartan nopeasti (~10-30 s)
 
 ## Tiedostot
@@ -166,9 +196,11 @@ Avaa `kartta.html` selaimessa.
 ### Dataskriptit
 - `asuntohinnat.py` - Hakee asuntohintadatan Tilastokeskuksesta (2009-2025) ja laskee lineaarisen ennusteen (2026)
 - `lataa_postinumeroalueet.py` - Hakee postinumeroalueiden tarkat geometriat Tilastokeskuksen WFS-rajapinnasta
-- `rikasta_data.py` - Hakee Paavo-väestötiedot aikasarjana (2015-2026) ja palvelutiedot OSM-datasta (Geofabrik)
+- `rikasta_data.py` - Hakee Paavo-väestötiedot aikasarjana (2015-2026, 113 kenttää + 8 johdettua muuttujaa) ja palvelutiedot OSM-datasta (9 kategoriaa)
 - `laske_trendianalyysi.py` - Laskee 5 vuoden trendit, volatiliteetin ja markkinaaktiivisuuden
-- `laske_ennusteet.py` - Laskee edistyneet ennustemallit (ARIMA, Exponential Smoothing) vuodelle 2026
+- `laske_ennusteet.py` - Laskee edistyneet ennustemallit (ARIMA, Exponential Smoothing, SARIMAX-Euribor) vuodelle 2026
+- `lataa_matka_ajat.py` - Laskee matka-ajat lähimpään kaupunkikeskustaan (Digitransit API / Haversine-fallback)
+- `lataa_euribor.py` - Hakee 12 kk Euribor-aikasarjan ECB:n Statistical Data Warehouse -rajapinnasta
 - `kartta_polygon.py` - Luo interaktiivisen kartan
 
 ### Datatiedostot (generoituvat)
@@ -177,7 +209,9 @@ Avaa `kartta.html` selaimessa.
 - `data/postinumerokoordinaatit.json` - Alueiden keskipisteet
 - `data/rikastettu_data.json` - Väestötiedot aikasarjana (2015-2026, 3044 aluetta) + palvelutiedot (~1.2 MB)
 - `data/trendianalyysi.json` - 5 vuoden trendianalyysi (867 aluetta) (~217 KB)
-- `data/ennusteet_mallit.json` - Ennusteet kolmella mallilla (Linear, ARIMA, Exponential) (~600 KB)
+- `data/ennusteet_mallit.json` - Ennusteet neljällä mallilla (Linear, ARIMA, Exponential, SARIMAX-Euribor) (~800 KB)
+- `data/matka_ajat.json` - Matka-ajat lähimpään keskustaan (1723 aluetta, 7 kaupunkia) (~200 KB)
+- `data/euribor.json` - 12 kk Euribor-korko kuukausittain ja vuosikeskiarvoin (2005–2026) (~10 KB)
 - `data/korrelaatiot.json` - Placeholder korrelaatioanalyysia varten
 - `finland-latest.osm.pbf` - OpenStreetMap data Suomesta (~676 MB, ladataan rikasta_data.py:llä)
 
@@ -190,8 +224,10 @@ Avaa `kartta.html` selaimessa.
 - **Datalähde:** 
   - Asuntohinnat: Tilastokeskus StatFin API (ashi_13mu)
   - Geometriat: Tilastokeskus WFS API (postialue:pno_tilasto)
-  - Väestötiedot: Tilastokeskus WFS API (postialue:pno_tilasto_XXXX, vuodet 2015-2026)
-  - Palvelutiedot: OpenStreetMap via Geofabrik (finland-latest.osm.pbf)
+  - Väestötiedot: Tilastokeskus WFS API (postialue:pno_tilasto_XXXX, vuodet 2015-2026, 113 kenttää)
+  - Palvelutiedot: OpenStreetMap via Geofabrik (finland-latest.osm.pbf, 9 kategoriaa)
+  - Matka-ajat: Digitransit Routing API v2 / Haversine-laskennallinen arvio
+  - Euribor: ECB Statistical Data Warehouse (12 kk Euribor, 2005–2026)
 - **Geometriatarkkuus:**
   - 8 desimaalin koordinaattitarkkuus (WFS: `coordinate_precision:8`)
   - Ei geometrian yksinkertaistusta (WFS: `decimation:NONE`, Leaflet: `smoothFactor:0`)
@@ -202,15 +238,18 @@ Avaa `kartta.html` selaimessa.
   - **Linear** - Yksinkertainen lineaarinen trendi viimeisen 5 vuoden (2021-2025) datasta
   - **ARIMA** - ARIMA(1,1,1) autoregressive integrated moving average (statsmodels)
   - **Exponential Smoothing** - Holt's simple exponential smoothing (statsmodels)
+  - **SARIMAX-Euribor** - SARIMAX(1,1,1) 12 kk Euribor eksogenisenä muuttujana (Himmelberg ym. 2005: korko on tärkein makroselittäjä)
   - Käyttäjä voi valita mallin kartalla pudotusvalikosta
 - **Trendianalyysi:** 5 vuoden (2019-2024) lineaarinen regressio, volatiliteetti (keskihajonta), aktiivisuus (keskimääräiset kaupat)
 - **Väestödata:** 
   - Aikasarja 2015-2026 (12 vuotta × 3044 postinumeroaluetta ≈ 36,500 tietuetta)
   - Huom: Paavo-data julkaistaan +1 vuoden viiveellä (pno_tilasto_2025 sisältää 31.12.2024 tilanteen)
+  - 113 kenttää per postinumero (ikäjakauma, tuloluokat, rakennuskanta, 26 toimialaa, talouksien tyyppi, omistus/vuokra)
+  - 8 johdettua muuttujaa (lapset_osuus, työikäiset_osuus, eläkeikäiset_osuus, omistusaste, vuokra_aste, korkeakoulutetut_osuus, kerrostalo_osuus, tp_palvelut_osuus, tp_ict_osuus)
 - **Palveludata:**
   - OSM-data parsed osmium-kirjastolla (1.7M+ nodea)
   - Point-in-polygon tarkistus shapely-kirjastolla
-  - 6 palvelukategoriaa, painotettu palveluindeksi
+  - 9 palvelukategoriaa, painotettu palveluindeksi
   - 1134/1723 alueella palvelutietoja (66%)
   - Snapshot nykyhetkestä (ei aikasarjaa)
 - **Datamäärä:** 
@@ -219,8 +258,10 @@ Avaa `kartta.html` selaimessa.
   - 2 mittaria (hinta, kauppamäärä)
   - 1723 postinumeroaluetta
   - ≈ 155,000 datapistettä asuntohinnoissa
-  - ≈ 36,500 datapistettä väestötiedoissa
-  - ≈ 10,000 datapistettä palvelutiedoissa (6 kategoriaa × 1134 aluetta + palveluindeksit)
+  - ≈ 36,500 datapistettä väestötiedoissa (113 kenttää + 8 johdettua per alue per vuosi)
+  - ≈ 15,000 datapistettä palvelutiedoissa (9 kategoriaa × 1134 aluetta + palveluindeksit)
+  - ≈ 1,723 matka-aikatietoa (minuutit, lähin keskusta, etäisyys km)
+  - ≈ 254 kuukausittaista + 22 vuosittaista Euribor-datapistettä
   - ≈ 414,000 koordinaattipistettä geometrioissa
 
 ### GitHub Actions deployment
@@ -253,7 +294,7 @@ Alla olevat ideat nousevat suoraan tutkimuskirjallisuudesta (ks. Kirjallisuuskat
 
 | Idea | Tutkimusperusta | Toteutus | Prioriteetti |
 |------|----------------|----------|-------------|
-| **Korkotaso eksogenisenä muuttujana** | Himmelberg ym. (2005): korko on tärkein makroselittäjä. 1 %-yksikön muutos → 5–10 % hintavaikutus | Hae 12 kk Euribor Suomen Pankista. SARIMAX-malli `exog=[euribor]`. Sama korkosarja kaikille alueille. | ⭐ Korkea |
+| **Korkotaso eksogenisenä muuttujana** | Himmelberg ym. (2005): korko on tärkein makroselittäjä. 1 %-yksikön muutos → 5–10 % hintavaikutus | ✅ Toteutettu 6.3.2026: 12 kk Euribor ECB:stä, SARIMAX(1,1,1) `exog=[euribor]`, 2726 ennustetta. | ✅ Valmis |
 | **Tulotaso ja työttömyys ennusteissa** | Holly & Jones (1997): tulot ja hinnat yhteisintegroituneita | Paavo-data on jo käytettävissä. Lisää aluetason tulot ja työttömyys SARIMAX-mallin eksogenisinä muuttujina. | ⭐ Korkea |
 | **Väestönmuutos ennusteissa** | Mankiw & Weil (1989): työikäinen väestö ennustaa kysyntää | Paavo-väestödata aikasarjana 2015–2026. Lisää väestönmuutos-% eksogenisena muuttujana. | ⭐ Korkea |
 | **Hedoninen hintamalli** | Rosen (1974): hinta = ominaisuuksien summa | Regressiomalli: hinta ~ palveluindeksi + tulotaso + väkiluku + keski-ikä + työttömyys. Poikkileikkausennuste. | Keskitaso |
@@ -284,7 +325,7 @@ ennuste = results.forecast(steps=1, exog=euribor_ennuste)
 |------|----------------|-----------|-------------|
 | **Kohtuuhintaisuusindeksi (affordability)** | Himmelberg ym. (2005): user cost of housing | ✅ Jo toteutettu (hinta/tulot-suhde) | ✅ Valmis |
 | **P/R-ratio (hinta/vuokra-suhde)** | Brännback & Oikarinen (2019): P/R-ratio kertoo yli/aliarvostuksesta | Omistushinnat + vuokradata jo käytettävissä. Laske `ostohinta / (vuosivuokra)`. Näytä kartalla. | ⭐ Korkea |
-| **Matka-aikakartta (isokroni)** | Alonso (1964), Laakso (1997): saavutettavuus #1 hintaselittäjä | Digitransit/HERE API → matka-aika keskustaan minuuteissa. Värikarttaleiri minuuttien mukaan. | ⭐ Korkea |
+| **Matka-aikakartta (isokroni)** | Alonso (1964), Laakso (1997): saavutettavuus #1 hintaselittäjä | ✅ Toteutettu 6.3.2026: Digitransit API + Haversine-fallback, 7 kaupunkia, värikoodattu popup, finder-integraatio. | ✅ Valmis |
 | **Koulujen laatu** | Black (1999), Harjunen ym. (2018): koulun laatu → 2–5 % hintavaikutus | Opetushallituksen Vipunen-tietopalvelu: oppimistulokset alueittain | Keskitaso |
 | **Rikollisuuskartta** | Gibbons (2004): -10 % rikoksia → +1–3 % hintoja | Poliisi / tilastokeskus: rikokset kunnittain | Keskitaso |
 | **Viheralueindeksi** | Votsis & Perrels (2016): viheralueet +3–5 % Suomessa | OSM: `leisure=park`, `natural=wood` → pinta-ala per postinumero | Keskitaso |
@@ -305,11 +346,11 @@ ennuste = results.forecast(steps=1, exog=euribor_ennuste)
 Tutkimuskirjallisuuden selitysvoiman ja teknisen toteutettavuuden perusteella suositeltu toteutusjärjestys:
 
 1. **🥇 P/R-ratio kartalle** — helppo toteuttaa (data on), korkea informaatioarvo sijoittajille
-2. **🥇 Euribor eksogenisenä** — suurin yksittäinen ennustemallin parannus, data helppo hakea
+2. ~~**🥇 Euribor eksogenisenä**~~ — ✅ Toteutettu 6.3.2026
 3. **🥈 Tulotaso + väestö ennusteissa** — Paavo-data jo käytössä, vain mallipäivitys
-4. **🥈 Matka-aikakartta** — #1 hintaselittäjä, mutta API-integraatio vaatii työtä
+4. ~~**🥈 Matka-aikakartta**~~ — ✅ Toteutettu 6.3.2026
 5. **🥉 Hedoninen regressio** — kokonaisvaltainen selittävä malli, vaatii tilastotieteen osaamista
-6. **🥉 Viheralueindeksi OSM:stä** — OSM-data ja parseri jo olemassa, vain uusi kategoria
+6. ~~**🥉 Viheralueindeksi OSM:stä**~~ — ✅ Toteutettu 6.3.2026
 
 ### 1. Ennustemallien parantaminen
 
@@ -336,9 +377,9 @@ Tutkimuskirjallisuuden selitysvoiman ja teknisen toteutettavuuden perusteella su
   - *Toteutus:* Laske RMSE, MAE, R² vertaamalla 2020-2024 ennusteita todelliseen dataan. Näytä parhaiten toiminut malli per alue.
   - *Esimerkki:* "00100: ARIMA paras (RMSE=142 €/m²), Linear keskinkertainen (RMSE=218 €/m²)"
 
-- **Eksogeniset muuttujat** (ulkoiset tekijät)
+- **Eksogeniset muuttujat** (ulkoiset tekijät) ✅ Osittain toteutettu
   - *Miksi:* Asuntohintoihin vaikuttavat Euribor-korot, työttömyys, väestönkasvu.
-  - *Toteutus:* Hae Euribor-korot ja työttömyysprosentit Tilastokeskuksesta. Käytä SARIMAX-mallissa eksogenisina muuttujina.
+  - *Toteutus:* ✅ Euribor-korot haettu ECB:stä ja käytetty SARIMAX-mallissa. Työttömyys ja väestödata Paavosta saatavilla seuraavaksi.
 
 ### 2. Korrelaatioanalyysi ja data-visualisointi
 
@@ -348,7 +389,7 @@ Tutkimuskirjallisuuden selitysvoiman ja teknisen toteutettavuuden perusteella su
 
 - **Aikasarjakaaviot** (line charts) ✅ Toteutettu
   - *Miksi:* Yksittäisen alueen trendin näkeminen vuosittain on helpompaa viivakaaviosta kuin kartalta.
-  - *Toteutus:* Klikkaa postinumeroaluetta kartalla → popupissa "📊 Näytä aikasarja" -nappi → avaa sivupaneelin Chart.js-viivakaavioilla: hintakehitys, kaupat, vuokrat, vuokratuotto, väestö & keski-ikä, tulotaso & työttömyys. Kaikki huoneistotyypit samassa kaaviossa.
+  - *Toteutus:* Klikkaa postinumeroaluetta kartalla → popupissa "📊 Näytä aikasarja" -nappi → avaa sivupaneelin Chart.js-viivakaavioilla: hintakehitys, kaupat, vuokrat, vuokratuotto, väestö & keski-ikä, tulotaso & työttömyys, ikärakenne, asuntorakenne & hallinta, hinta vs. Euribor. Kaikki huoneistotyypit samassa kaaviossa.
   - *Esimerkki:* "00100: Hinta noussut tasaisesti 2009-2019 (+4.1%/v), romahdus 2020 (-3.2%), elpynyt 2021-2025 (+3.8%/v)."
 
 - **Interaktiivinen korrelaatiomatriisi**
@@ -441,10 +482,10 @@ Tutkimuskirjallisuuden selitysvoiman ja teknisen toteutettavuuden perusteella su
   - *Kattavuus:* 1711/3044 postinumeroalueella (56%)
   - *Kategoriat:* kaupat, koulut, päiväkodit, liikuntapaikat, terveysasemat, julkinen liikenne
 
-- **Liikennedata** (matka-aika keskustaan)
-  - *Miksi:* Matka-aika työpaikalle on tärkein tekijä asunnon valinnassa.
-  - *Toteutus:* Digitransit API (PK-seutu, ilmainen). Laske matka-aika alueelta Helsingin rautatieasemalle.
-  - *Haaste:* Digitransit API kattaa vain PK-seudun ja suurimmat kaupungit.
+- **Liikennedata** (matka-aika keskustaan) ✅ Toteutettu
+  - *Status:* ✅ Toteutettu 6.3.2026
+  - *Ratkaisu:* Digitransit API v2 (julkinen liikenne) + Haversine-fallback (laskennallinen auto-arvio). 7 kaupunkikeskustaa. Matka-aika, etäisyys km, lähin keskusta, kulkutapa näkyvissä popupissa.
+  - *Kattavuus:* 1723 postinumeroaluetta
 
 - **Uudiskohteet** (rakenteilla olevat asunnot)
   - *Miksi:* Isot rakennusprojektit voivat vaikuttaa alueen hintoihin.
@@ -471,7 +512,7 @@ Tutkimuskirjallisuuden selitysvoiman ja teknisen toteutettavuuden perusteella su
 
 - **"Paras alue minulle" -hakutyökalu** ✅ Toteutettu
   - *Miksi:* Asunnon ostaja tietää budjettinsa ja tarpeensa, mutta ei tunne kaikkia alueita.
-  - *Toteutus:* Suodatinpaneeli oikeassa reunassa: kuntavalinta (293 kuntaa), huoneistotyyppivalinta, max neliöhinta (liukusäädin), min väkiluku, palveluvaatimukset (kaupat, koulut, päiväkodit, liikunta, terveys, julk.liikenne), min palveluindeksi. Tulokset korostetaan kartalla vihreällä ja listataan paneelissa palveluindeksin mukaan. Klikkaus zoomaa alueelle.
+  - *Toteutus:* Suodatinpaneeli oikeassa reunassa: kuntavalinta (293 kuntaa), huoneistotyyppivalinta, max neliöhinta (liukusäädin), min väkiluku, palveluvaatimukset (kaupat, koulut, päiväkodit, liikunta, terveys, julk.liikenne), min palveluindeksi, max matka-aika keskustaan (0–120 min). Tulokset korostetaan kartalla vihreällä ja listataan paneelissa palveluindeksin mukaan. Klikkaus zoomaa alueelle.
   - *Nappi:* "🔍 Paras alue" -painike kartan vasemmassa alareunassa.
 
 - **Hinta/tulot -suhdekartta** (asumisen kohtuuhintaisuus) ✅ Toteutettu
@@ -500,6 +541,102 @@ Tutkimuskirjallisuuden selitysvoiman ja teknisen toteutettavuuden perusteella su
 - **Rakennusvuositieto**
   - *Miksi:* Alueen keskimääräinen rakennusvuosi kertoo paljon rakennuskannan laadusta ja remonttitarpeesta.
   - *Toteutus:* Tilastokeskuksen rakennuskanta-data. Laske keskimääräinen rakennusvuosi postinumeroalueittain.
+
+### 7. Uudet kehitysehdotukset (6.3.2026 jälkeen)
+
+Alla olevat ehdotukset perustuvat toteutettuihin ominaisuuksiin ja niiden jatkokehitykseen.
+
+#### A. Ennustemallien jatkokehitys
+
+- **Tulotaso ja väestö SARIMAX-eksogenisinä** ⭐ Korkea prioriteetti
+  - *Miksi:* Holly & Jones (1997): tulot ja hinnat ovat yhteisintegroituneita. Mankiw & Weil (1989): työikäinen väestö ennustaa kysyntää.
+  - *Toteutus:* Paavo-aikasarjadata (tulot, väestönmuutos-%) jo käytettävissä. Lisää aluetason tulotaso ja väestönmuutos SARIMAX-mallin eksogenisinä muuttujina Euriborin rinnalle.
+  - *Odotettu hyöty:* Aluekohtainen ennusteen tarkennus — Euribor vaikuttaa kaikille alueille samalla tavalla, mutta tulotaso ja väestö eriyttävät ennusteet.
+
+- **Ennusteiden backtesting ja tarkkuusmetriikat** ⭐ Korkea prioriteetti
+  - *Miksi:* Nyt on 4 ennustemallia mutta ei tietoa kumpi on paras millekin alueelle.
+  - *Toteutus:* Jaa data: history (2009-2023) vs. test (2024-2025). Laske RMSE, MAE, MAPE per malli per alue. Näytä kartalla "paras malli" per alue. Popup: "SARIMAX-Euribor paras tällä alueella (RMSE=89 €/m²)".
+  - *Bonus:* Ensemble-ennuste (painotettu keskiarvo parhaiden mallien mukaan).
+
+- **Luottamusvälit ennusteille**
+  - *Miksi:* Ennusteen epävarmuus on tärkeä tieto. Nyt näytetään vain pisteluku.
+  - *Toteutus:* Laske jäännösten keskihajonta historiallisesta datasta. Näytä 80% ja 95% luottamusvälit popupissa ja aikasarjakaaviossa.
+
+- **Prophet/NeuralProphet -malli**
+  - *Miksi:* Käsittelee automaattisesti trendien muutoksia ja poikkeavia arvoja.
+  - *Toteutus:* `neuralprophet`-kirjasto (kevyempi kuin alkuperäinen Prophet). Tukee regressoreita (Euribor, tulotaso).
+
+#### B. Matka-aikojen jatkokehitys
+
+- **Isokronikartta (matka-aikakerrokset)** ⭐ Korkea prioriteetti
+  - *Miksi:* "Missä pääsen töihin alle 30 minuutissa?" on tyypillinen asunnonetsijän kysymys.
+  - *Toteutus:* Uusi värikarttataso matka-ajan mukaan. Vihreä ≤20 min, keltainen ≤40 min, oranssi ≤60 min, punainen >60 min. Valittava kohdekaupunki dropdownista.
+
+- **Digitransit API-avaimella tarkka joukkoliikennedata**
+  - *Miksi:* Haversine-fallback antaa vain suuntaa-antavan auto-arvion. Oikea joukkoliikenneaika voi olla moninkertainen (erityisesti maaseudulla).
+  - *Toteutus:* Rekisteröidy `digitransit.fi/developers`, aseta `DIGITRANSIT_API_KEY`. Skripti tukee jo API:a — vain avain puuttuu.
+
+- **Matka-aika useampiin kohteisiin**
+  - *Miksi:* Ei kaikki käy töissä lähimmässä keskustassa.
+  - *Toteutus:* Lisää kohteita: yliopistot, lentokentät, suuret työnantajat. Käyttäjä valitsee oman kohteensa kartalla → matka-aika lasketaan lennossa.
+
+#### C. Visualisoinnit ja analyysityökalut
+
+- **Hedoninen hintamalli (regressio)** ⭐ Korkea prioriteetti
+  - *Miksi:* Rosen (1974): hinta on ominaisuuksien summa. Nyt on riittävästi piirteitä (~20 muuttujaa per alue).
+  - *Toteutus:* OLS-regressio: `hinta ~ tulotaso + palveluindeksi + matka_aika + omistusaste + korkeakoulutetut + kerrostalo_osuus + ...`. Näytä kunkin tekijän euro-osuus popupissa: "Tämän alueen hinnasta 35 % selittyy tulotasolla, 20 % matka-ajalla, 15 % palveluilla…"
+
+- **Bubble detector (yliarvostustunnistin)**
+  - *Miksi:* Case & Shiller (1989): hinta vs. fundamentaaliarvo paljastaa mahdolliset kuplat.
+  - *Toteutus:* Laske hedonisen mallin `toteutunut_hinta / selitetty_hinta`. Jos suhde > 1.2 → mahdollinen yliarvostus. Väritä kartalla punaiseksi. "00100: Hinta 18% yli fundamentaaliarvon."
+
+- **Multi-select aluevertailu**
+  - *Miksi:* Asunnonostaja vertaa tyypillisesti 2–5 aluetta.
+  - *Toteutus:* Shift+klikkaa useita alueita → vertailutaulukko: hinta, matka-aika, palveluindeksi, väestörakenne, tulotaso, ennuste rinnakkain.
+
+- **Inflaatiokorjatut hinnat**
+  - *Miksi:* 2009 ja 2025 eurot eivät ole vertailukelpoisia.
+  - *Toteutus:* Hae kuluttajahintaindeksi Tilastokeskuksesta (StatFin khi). Deflatoi hinnat vuoden 2025 euroiksi. Toggle "Nimellinen / Reaalinen" kartalla.
+
+- **Scatter plot -analyysityökalu**
+  - *Miksi:* Visualisoi korrelaatioita: matka-aika vs. hinta, palveluindeksi vs. hinta, tulotaso vs. hinta.
+  - *Toteutus:* Uusi välilehti "Analyysi". Käyttäjä valitsee X- ja Y-akselin. Jokainen piste = postinumeroalue. R²-arvo ja regressiosuora näkyviin.
+
+#### D. Datan laajentaminen
+
+- **LIPAS-liikuntapaikkatiedot**
+  - *Miksi:* Virallinen ja kattavampi kuin OSM erityisesti uimahalleille, ulkoilureiteille ja frisbeegolf-radoille.
+  - *Toteutus:* `lipas.fi/api` → JSON, suora `location.postalCode`-yhdistys. ~40 000 kohdetta.
+
+- **Kiinteistöverotiedot kunnittain**
+  - *Miksi:* Kiinteistövero vaihtelee 0.93–2.0 % ja vaikuttaa asumiskustannuksiin.
+  - *Toteutus:* Kuntaliiton data → pno→kunta mapping → vero-% jokaiselle postinumeroalueelle.
+
+- **Rakennuskustannusindeksi**
+  - *Miksi:* Glaeser & Gyourko (2005): rakennuskustannukset asettavat alarajan hinnoille.
+  - *Toteutus:* Tilastokeskus (rki). Yhteinen kaikille → näytä aikasarjakaaviossa hinnan rinnalla.
+
+- **Sotkanet terveys- ja hyvinvointidata (kuntataso)**
+  - *Miksi:* Sairastavuusindeksi ja toimeentulotuki kertovat alueen hyvinvoinnista.
+  - *Toteutus:* `sotkanet.fi/api` → 3000 indikaattoria kuntataso → pno-yhdistys.
+
+#### E. Käyttöliittymäparannukset
+
+- **Jakolinkit (URL-parametrit)** ⭐ Korkea prioriteetti
+  - *Miksi:* "Katso tätä aluetta!" — käyttäjät haluavat jakaa tarkan näkymän.
+  - *Toteutus:* URL query: `?year=2025&zip=00100&type=0&metric=keskihinta`. JS lukee parametrit latautuessa.
+
+- **Tumma tila (dark mode)**
+  - *Miksi:* Silmien säästö ja OLED-energiansäästö.
+  - *Toteutus:* CSS-muuttujat + CartoDB Dark Matter tiilet. LocalStorage muistaa valinnan.
+
+- **PDF/PNG-vienti**
+  - *Miksi:* Karttanäkymien jakaminen raporteissa ja somessa.
+  - *Toteutus:* html2canvas tai Leaflet.EasyPrint plugin.
+
+- **Palveluindeksin mukauttaminen (käyttäjäkohtaiset painot)**
+  - *Miksi:* Lapsiperheelle päiväkodit tärkeitä, eläkeläiselle kaupat.
+  - *Toteutus:* Liukusäätimet jokaiselle 9 kategorialle. Indeksi lasketaan uudelleen dynaamisesti selaimessa.
 
 **Osallistu kehitykseen!** Ehdotuksia ja pull requestejä otetaan vastaan mielellään.
 
@@ -584,13 +721,15 @@ Tutkimuskirjallisuuden perusteella asuntojen ja vuokrien hintoja selittävät te
 ### Relevanssi tälle projektille
 
 Tässä hintakarttaprojektissa mitataan useita näistä tekijöistä:
-- ✅ **Sijainti** — postinumeroalueet, kaupunkinavigointi
-- ✅ **Tulotaso** — Paavo-tietokannan keskitulot, hinta/tulot-suhde
-- ✅ **Väestö** — väkiluku, keski-ikä, muuttoliike (väestönmuutos-%)
-- ✅ **Palvelut** — 6 kategoriaa OSM-datasta, palveluindeksi (tiheys/km², log-skaalaus)
-- ✅ **Työllisyys** — työttömyysaste Paavosta
+- ✅ **Sijainti** — postinumeroalueet, kaupunkinavigointi, matka-aika keskustaan (7 kaupunkia)
+- ✅ **Tulotaso** — Paavo-tietokannan keskitulot, hinta/tulot-suhde, tuloluokat
+- ✅ **Väestö** — väkiluku, keski-ikä, ikärakenne (20 ikäryhmää), muuttoliike (väestönmuutos-%)
+- ✅ **Palvelut** — 9 kategoriaa OSM-datasta, palveluindeksi (tiheys/km², log-skaalaus)
+- ✅ **Työllisyys** — työttömyysaste Paavosta, 26 toimialaa
+- ✅ **Korkoympäristö** — 12 kk Euribor (ECB, 2005–2026), SARIMAX-ennustemalli
+- ✅ **Asuntorakenne** — kerrostalo/pientalo-osuus, keskipinta-ala, omistus/vuokra
+- ✅ **Koulutustaso** — korkeakoulutetut-%, koulutusastejakauma
 - ⬜ **Asunnon ominaisuudet** — ei saatavilla aggregaattitasolla
-- ⬜ **Korkoympäristö** — yhteinen kaikille alueille, ei alueellista vaihtelua
 - ⬜ **Kaavoitus ja tarjonta** — ei dataa saatavilla
 
 ---
@@ -619,8 +758,7 @@ Kattava kartoitus kaikista avoimista ja puoliavoimista datalähteistä, jotka ta
 | **Pääasiallinen toiminta** | `pt_` | 7 | `pt_vakiy` (väestö yht.), `pt_tyoll` (työlliset), `pt_tyott` (työttömät), `pt_opisk` (opiskelijat), `pt_elakel` (eläkeläiset), `pt_muut` (muut), `pt_0_14` (0–14-vuotiaat) |
 | **Sijainti ja geometria** | — | 4 | `euref_x/y` (koordinaatit), `pinta_ala` (m²), `kunta` (kuntakoodi) |
 
-**Käytössä projektissa:** `he_vakiy`, `he_kika`, `pt_tyoll`, `pt_tyott`, `pt_opisk`, `pt_elakel`, `hr_mtu`, `ko_ika18y`, `te_as_valj`
-**Käyttämättä:** ~100 kenttää, mm. koko ikäjakauma, tuloluokat, talouksien elämänvaiheet, rakennuskanta, 26 toimialaa
+**Käytössä projektissa:** Kaikki 113 kenttää + 8 johdettua muuttujaa (lapset_osuus, työikäiset_osuus, eläkeikäiset_osuus, omistusaste, vuokra_aste, korkeakoulutetut_osuus, kerrostalo_osuus, tp_palvelut_osuus, tp_ict_osuus)
 
 ### 2. Tilastokeskus: StatFin-tietokannat (PxWeb API)
 
@@ -654,12 +792,15 @@ Kattava kartoitus kaikista avoimista ja puoliavoimista datalähteistä, jotka ta
 | Liikuntapaikat | `leisure=fitness_centre`, `leisure=sports_centre` |
 | Terveysasemat | `amenity=doctors`, `amenity=clinic`, `amenity=hospital` |
 | Julkinen liikenne | `highway=bus_stop`, `railway=station/tram_stop/halt` |
+| Ravintolat | `amenity=restaurant` |
+| Kahvilat | `amenity=cafe`, `amenity=bar` |
+| Puistot | `leisure=park` |
 
 **Lisäksi saatavilla OSM:stä (ei vielä käytössä):**
 | Kategoria | OSM-tagi | Relevanssi hintakarttaan |
 |-----------|----------|------------------------|
-| Ravintolat/kahvilat | `amenity=restaurant`, `amenity=cafe`, `amenity=bar` | Korkea — käveltävyys (Pope & Pope 2015) |
-| Puistot/viheralueet | `leisure=park`, `natural=wood`, `landuse=forest` | Korkea — Votsis & Perrels (2016): +3–5 % |
+| Ravintolat/kahvilat | `amenity=restaurant`, `amenity=cafe`, `amenity=bar` | ✅ Toteutettu 6.3.2026 |
+| Puistot/viheralueet | `leisure=park`, `natural=wood`, `landuse=forest` | ✅ Puistot toteutettu, metsät ei vielä |
 | Kirjastot | `amenity=library` | Keskitaso — julkiset palvelut |
 | Apteekit | `amenity=pharmacy` | Keskitaso — terveyspalvelut |
 | Pankit/pankkiautomaatit | `amenity=bank`, `amenity=atm` | Matala |
@@ -754,13 +895,13 @@ Kattava kartoitus kaikista avoimista ja puoliavoimista datalähteistä, jotka ta
 
 | # | Datalähde | Taso | Avoin API | Nyt käytössä | Kenttiä | Prioriteetti lisäykselle |
 |---|-----------|------|-----------|-------------|--------|------------------------|
-| 1 | **Paavo WFS** | Postinumero | ✅ | ✅ (9/113) | 113 | ⭐ Hae loput 100+ kenttää |
+| 1 | **Paavo WFS** | Postinumero | ✅ | ✅ (113/113) | 113 | ✅ Valmis |
 | 2 | **StatFin ashi** | Postinumero | ✅ | ✅ | ~10 | ✅ Valmis |
 | 3 | **StatFin asvu** | Postinumero | ✅ | ✅ | ~5 | ✅ Valmis |
-| 4 | **OSM Geofabrik** | Point-in-polygon | ✅ | ✅ (6 kat.) | ∞ | ⭐ Ravintolat, puistot |
-| 5 | **Digitransit** | Reititys | ✅ (rek.) | ⬜ | matka-aika | ⭐ Korkein uusi prioriteetti |
+| 4 | **OSM Geofabrik** | Point-in-polygon | ✅ | ✅ (9 kat.) | ∞ | ✅ Valmis |
+| 5 | **Digitransit** | Reititys | ✅ (rek.) | ✅ | matka-aika | ✅ Valmis |
 | 6 | **LIPAS** | Postinumero | ✅ | ⬜ | ~40k paikkaa | Keskitaso |
-| 7 | **Suomen Pankki** | Koko maa | ✅ | ⬜ | Euribor ym. | ⭐ Ennustemallit |
+| 7 | **Suomen Pankki/ECB** | Koko maa | ✅ | ✅ | Euribor | ✅ Valmis |
 | 8 | **Kuntaliitto** | Kunta | ✅ | ⬜ | Verot | Keskitaso |
 | 9 | **THL Sotkanet** | Kunta | ✅ | ⬜ | ~3000 | Matala (ei pno) |
 | 10 | **FMI** | Asema | ✅ | ⬜ | Sää/ilma | Matala |
@@ -771,29 +912,37 @@ Kattava kartoitus kaikista avoimista ja puoliavoimista datalähteistä, jotka ta
 
 ### Konkreettiset suositukset: Mitä lisätä seuraavaksi?
 
-**1. Paavon käyttämättömät kentät (helpoin, suurin hyöty):**
-- Ikäjakauma (20 ikäryhmää) → lapsiperheystävällisyys, eläkeläisalue-tunnistus
-- Tuloluokat (`hr_pi_tul`, `hr_ke_tul`, `hr_hy_tul`) → tulopolarisoituminen
-- Rakennuskanta (`ra_as_kpa`, `ra_kt_as`, `ra_pt_as`) → asuntokannan tyyppi/ikä
-- Työpaikka-aineisto (26 toimialaa) → alueen elinkeinorakenne, ICT-keskittymät
-- Talouksien tyyppi (`te_yks`, `te_laps`, `te_elak`) → elämänvaiheprofiili
-- Omistus vs. vuokra (`te_omis_as`, `te_vuok_as`) → hallintamuotojakauma
+**1. Paavon käyttämättömät kentät** ✅ Toteutettu 6.3.2026
+- Kaikki 113 kenttää haetaan ja 8 johdettua muuttujaa lasketaan
+- Ikäjakauma (20 ikäryhmää) → lapset/työikäiset/eläkeikäiset osuudet
+- Tuloluokat (hr_pi_tul, hr_ke_tul, hr_hy_tul)
+- Rakennuskanta (ra_as_kpa, ra_kt_as, ra_pt_as) → kerrostalo-osuus
+- Työpaikka-aineisto (26 toimialaa) → ICT-osuus, palveluala-osuus
+- Talouksien tyyppi (te_yks, te_laps, te_elak)
+- Omistus vs. vuokra (te_omis_as, te_vuok_as) → omistusaste
 
-**2. OSM-parserin laajentaminen (helppo, data jo ladattu):**
-- Ravintolat + kahvilat → käveltävyysindeksin komponentti
-- Puistot + viheralueet (pinta-ala) → viheralueindeksi (Votsis 2016)
+**2. OSM-parserin laajentaminen** ✅ Toteutettu 6.3.2026
+- Ravintolat (amenity=restaurant, paino 0.7)
+- Kahvilat (amenity=cafe/bar, paino 0.5)
+- Puistot (leisure=park, paino 0.6)
 
-**3. Digitransit matka-aika (kohtalainen työ, korkein uusi arvo):**
-- Matka-aika keskustaan julkisilla → #1 hintaselittäjä kirjallisuuden mukaan
+**3. Digitransit matka-aika** ✅ Toteutettu 6.3.2026
+- Matka-aika 7 kaupunkikeskustaan (Helsinki, Tampere, Turku, Oulu, Kuopio, Jyväskylä, Lahti)
+- Digitransit API (julkinen liikenne) + Haversine-fallback (auto)
+- Värikoodattu popup + finder-suodatin
 
-**4. Euribor-aikasarja (helppo, suuri arvo ennusteissa):**
-- Suomen Pankki → SARIMAX-mallin eksogeninen muuttuja
+**4. Euribor-aikasarja** ✅ Toteutettu 6.3.2026
+- ECB Statistical Data Warehouse, 2005–2026
+- SARIMAX(1,1,1) ennustemalli eksogenisena muuttujana
+- Hinta vs. Euribor -aikasarjakaavio
 
 ## Lähdeviitteet
 
 - Asuntohinnat: [Tilastokeskus StatFin](https://stat.fi/) - ashi_13mu
 - Postinumeroalueet: [Tilastokeskus geo.stat.fi](https://geo.stat.fi/) - postialue:pno_tilasto
-- Väestötiedot: [Tilastokeskus Paavo](https://www.stat.fi/tup/paavo/) - postialue:pno_tilasto_XXXX
-- Palvelutiedot: [OpenStreetMap](https://www.openstreetmap.org/) via [Geofabrik](https://download.geofabrik.de/europe/finland.html) - finland-latest.osm.pbf
+- Väestötiedot: [Tilastokeskus Paavo](https://www.stat.fi/tup/paavo/) - postialue:pno_tilasto_XXXX (113 kenttää)
+- Palvelutiedot: [OpenStreetMap](https://www.openstreetmap.org/) via [Geofabrik](https://download.geofabrik.de/europe/finland.html) - finland-latest.osm.pbf (9 kategoriaa)
+- Matka-ajat: [Digitransit](https://digitransit.fi/) Routing API v2 + Haversine-laskennallinen arvio
+- Euribor: [ECB Statistical Data Warehouse](https://data.ecb.europa.eu/) - 12 kk Euribor (2005–2026)
 - Karttakirjasto: [Leaflet](https://leafletjs.com/)
 - OSM-parsing: [pyosmium](https://osmcode.org/pyosmium/)

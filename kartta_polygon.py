@@ -1671,9 +1671,11 @@ html = f'''<!DOCTYPE html>
             if (props.matka_aika && props.matka_aika.matka_aika_min) {{
                 var ma = props.matka_aika;
                 var matkaColor = ma.matka_aika_min <= 20 ? '#27ae60' : ma.matka_aika_min <= 45 ? '#f39c12' : ma.matka_aika_min <= 90 ? '#e67e22' : '#e74c3c';
+                var kulkutapa = ma.lahde === 'digitransit' ? 'julkinen liikenne' : 'laskennallinen arvio (auto)';
                 html += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
                     '<strong>🚌 Matka-aika keskustaan:</strong><br>' +
-                    '🏙️ ' + ma.lahin_keskusta + ': <strong style="color:' + matkaColor + '">' + ma.matka_aika_min + ' min</strong> (' + ma.etaisyys_km + ' km)</div>';
+                    '🏙️ ' + ma.lahin_keskusta + ': <strong style="color:' + matkaColor + '">' + ma.matka_aika_min + ' min</strong> (' + ma.etaisyys_km + ' km)<br>' +
+                    '<span style="font-size:11px;color:#888">' + kulkutapa + '</span></div>';
             }}
             
             // Paavo: laajennetut väestötiedot
@@ -1733,12 +1735,6 @@ html = f'''<!DOCTYPE html>
                         '🍽️ Ravintolat: ' + (p.ravintolat || 0) + '&nbsp;&nbsp;☕ Kahvilat: ' + (p.kahvilat || 0) + '&nbsp;&nbsp;🌳 Puistot: ' + (p.puistot || 0) + '<br>' +
                         '⭐ Palveluindeksi: ' + p.palveluindeksi.toFixed(1) + '</div>';
                 }}
-            }}
-            
-            // Euribor
-            if (euriborData && euriborData[selectedYear]) {{
-                html += '<div class="details" style="margin-top: 5px; border-top: 1px solid #eee; padding-top: 3px; color: #888; font-size: 11px;">' +
-                    '📈 12kk Euribor (' + selectedYear + '): ' + euriborData[selectedYear].keskiarvo.toFixed(2) + ' %</div>';
             }}
             
             return html;
