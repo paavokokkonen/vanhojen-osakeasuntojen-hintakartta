@@ -72,34 +72,189 @@ def hae_paavo_data():
                         if postinumero not in paavo_dict:
                             paavo_dict[postinumero] = {}
                         
-                        # Tallenna vuoden tiedot
-                        paavo_dict[postinumero][str(vuosi)] = {
-                            'vaesto': props.get('he_vakiy') or 0,  # Väestömäärä
-                            'keski_ika': props.get('he_kika') or 0,  # Keski-ikä
-                            'tyolliset': props.get('pt_tyoll') or 0,  # Työlliset
-                            'tyottomat': props.get('pt_tyott') or 0,  # Työttömät
-                            'elakelaiset': props.get('pt_elakel') or 0,  # Eläkeläiset
-                            'opiskelijat': props.get('pt_opisk') or 0,  # Opiskelijat
-                            'keskitulo': props.get('hr_mtu') or 0,  # Asuntokuntien keskitulot
-                            'koulutustaso': props.get('ko_ika18y') or 0,  # Korkea-aste
-                            'asuntokuntia': props.get('te_as_valj') or 0,  # Asuntokuntien koko
+                        # Tallenna vuoden tiedot — kaikki Paavo-kentät
+                        vuosi_data = {
+                            # --- Perustiedot (HE) ---
+                            'vaesto': props.get('he_vakiy') or 0,
+                            'keski_ika': props.get('he_kika') or 0,
+                            'miehet': props.get('he_miehet') or 0,
+                            'naiset': props.get('he_naiset') or 0,
+                            # Ikäjakauma (20 ikäryhmää)
+                            'ika_0_2': props.get('he_0_2') or 0,
+                            'ika_3_6': props.get('he_3_6') or 0,
+                            'ika_7_12': props.get('he_7_12') or 0,
+                            'ika_13_15': props.get('he_13_15') or 0,
+                            'ika_16_17': props.get('he_16_17') or 0,
+                            'ika_18_19': props.get('he_18_19') or 0,
+                            'ika_20_24': props.get('he_20_24') or 0,
+                            'ika_25_29': props.get('he_25_29') or 0,
+                            'ika_30_34': props.get('he_30_34') or 0,
+                            'ika_35_39': props.get('he_35_39') or 0,
+                            'ika_40_44': props.get('he_40_44') or 0,
+                            'ika_45_49': props.get('he_45_49') or 0,
+                            'ika_50_54': props.get('he_50_54') or 0,
+                            'ika_55_59': props.get('he_55_59') or 0,
+                            'ika_60_64': props.get('he_60_64') or 0,
+                            'ika_65_69': props.get('he_65_69') or 0,
+                            'ika_70_74': props.get('he_70_74') or 0,
+                            'ika_75_79': props.get('he_75_79') or 0,
+                            'ika_80_84': props.get('he_80_84') or 0,
+                            'ika_85_': props.get('he_85_') or 0,
+                            
+                            # --- Pääasiallinen toiminta (PT) ---
+                            'tyolliset': props.get('pt_tyoll') or 0,
+                            'tyottomat': props.get('pt_tyott') or 0,
+                            'elakelaiset': props.get('pt_elakel') or 0,
+                            'opiskelijat': props.get('pt_opisk') or 0,
+                            'pt_muut': props.get('pt_muut') or 0,
+                            'pt_0_14': props.get('pt_0_14') or 0,
+                            
+                            # --- Asukkaiden tulot (HR) ---
+                            'keskitulo': props.get('hr_mtu') or 0,  # Mediaanitulot
+                            'hr_ktu': props.get('hr_ktu') or 0,  # Keskitulot
+                            'hr_pi_tul': props.get('hr_pi_tul') or 0,  # Pienituloiset
+                            'hr_ke_tul': props.get('hr_ke_tul') or 0,  # Keskituloiset
+                            'hr_hy_tul': props.get('hr_hy_tul') or 0,  # Hyvätuloiset
+                            'hr_ovy': props.get('hr_ovy') or 0,  # Tulot yhteensä
+                            
+                            # --- Talouksien tulot (TR) ---
+                            'tr_mtu': props.get('tr_mtu') or 0,  # Talouksien mediaanitulot
+                            'tr_ktu': props.get('tr_ktu') or 0,  # Talouksien keskitulot
+                            'tr_pi_tul': props.get('tr_pi_tul') or 0,
+                            'tr_ke_tul': props.get('tr_ke_tul') or 0,
+                            'tr_hy_tul': props.get('tr_hy_tul') or 0,
+                            
+                            # --- Koulutusaste (KO) ---
+                            'koulutustaso': props.get('ko_ika18y') or 0,  # 18+ asukkaat
+                            'ko_perus': props.get('ko_perus') or 0,  # Perusaste
+                            'ko_ammat': props.get('ko_ammat') or 0,  # Ammattikoulutus
+                            'ko_al_kork': props.get('ko_al_kork') or 0,  # Alempi korkeakoulu
+                            'ko_yl_kork': props.get('ko_yl_kork') or 0,  # Ylempi korkeakoulu
+                            'ko_yliop': props.get('ko_yliop') or 0,  # Tutkijakoulutus
+                            
+                            # --- Taloudet (TE) ---
+                            'asuntokuntia': props.get('te_as_valj') or 0,  # Asumisväljyys m²/hlö
+                            'te_taly': props.get('te_taly') or 0,  # Talouksia yhteensä
+                            'te_yks': props.get('te_yks') or 0,  # Yksinasuvat
+                            'te_nuor': props.get('te_nuor') or 0,  # Nuoret
+                            'te_laps': props.get('te_laps') or 0,  # Lapsiperheet
+                            'te_klap': props.get('te_klap') or 0,  # Kouluikäisten lapsiperheet
+                            'te_aklap': props.get('te_aklap') or 0,  # Aikuisten lapsiperheet
+                            'te_elak': props.get('te_elak') or 0,  # Eläkeläistaloudet
+                            'te_omis_as': props.get('te_omis_as') or 0,  # Omistusasunnot
+                            'te_vuok_as': props.get('te_vuok_as') or 0,  # Vuokra-asunnot
+                            'te_muu_as': props.get('te_muu_as') or 0,  # Muu hallintamuoto
+                            'te_takk': props.get('te_takk') or 0,  # Talouden keskikoko
+                            
+                            # --- Rakennukset ja asunnot (RA) ---
+                            'ra_raky': props.get('ra_raky') or 0,  # Rakennuksia yhteensä
+                            'ra_asrak': props.get('ra_asrak') or 0,  # Asuinrakennuksia
+                            'ra_asunn': props.get('ra_asunn') or 0,  # Asuntoja yhteensä
+                            'ra_kt_as': props.get('ra_kt_as') or 0,  # Kerrostaloasuntoja
+                            'ra_pt_as': props.get('ra_pt_as') or 0,  # Pientaloasuntoja
+                            'ra_muu_as': props.get('ra_muu_as') or 0,  # Muita asuntoja
+                            'ra_ke': props.get('ra_ke') or 0,  # Kesämökkejä
+                            'ra_as_kpa': props.get('ra_as_kpa') or 0,  # Asuntojen keskipinta-ala m²
+                            
+                            # --- Työpaikat toimialoittain (TP) ---
+                            'tp_tyopy': props.get('tp_tyopy') or 0,  # Työpaikkoja yhteensä
+                            'tp_alku_a': props.get('tp_alku_a') or 0,  # A Alkutuotanto
+                            'tp_b_kaiv': props.get('tp_b_kaiv') or 0,  # B Kaivostoiminta
+                            'tp_c_teol': props.get('tp_c_teol') or 0,  # C Teollisuus
+                            'tp_d_ener': props.get('tp_d_ener') or 0,  # D Energia
+                            'tp_e_vesi': props.get('tp_e_vesi') or 0,  # E Vesihuolto
+                            'tp_f_rake': props.get('tp_f_rake') or 0,  # F Rakentaminen
+                            'tp_g_kaup': props.get('tp_g_kaup') or 0,  # G Kauppa
+                            'tp_h_kulj': props.get('tp_h_kulj') or 0,  # H Kuljetus
+                            'tp_i_majo': props.get('tp_i_majo') or 0,  # I Majoitus/ravintola
+                            'tp_j_info': props.get('tp_j_info') or 0,  # J ICT
+                            'tp_k_raho': props.get('tp_k_raho') or 0,  # K Rahoitus
+                            'tp_l_kiin': props.get('tp_l_kiin') or 0,  # L Kiinteistö
+                            'tp_m_erik': props.get('tp_m_erik') or 0,  # M Erikoispalvelut
+                            'tp_n_hall': props.get('tp_n_hall') or 0,  # N Hallinto/tukipalvelut
+                            'tp_o_julk': props.get('tp_o_julk') or 0,  # O Julkinen hallinto
+                            'tp_p_koul': props.get('tp_p_koul') or 0,  # P Koulutus
+                            'tp_q_terv': props.get('tp_q_terv') or 0,  # Q Terveys/sosiaali
+                            'tp_r_taid': props.get('tp_r_taid') or 0,  # R Taide/viihde
+                            'tp_s_muup': props.get('tp_s_muup') or 0,  # S Muu palvelu
+                            'tp_t_koti': props.get('tp_t_koti') or 0,  # T Kotitaloustyö
+                            'tp_u_kvli': props.get('tp_u_kvli') or 0,  # U Kansainväliset
+                            'tp_x_tunt': props.get('tp_x_tunt') or 0,  # X Tuntematon
                         }
                         
-                        vuosi_data = paavo_dict[postinumero][str(vuosi)]
+                        paavo_dict[postinumero][str(vuosi)] = vuosi_data
                         
-                        # Laske työttömyysaste
+                        # Laske johdannaismuuttujat
+                        
+                        # Työttömyysaste
                         tyossa = vuosi_data['tyolliset'] + vuosi_data['tyottomat']
                         if tyossa > 0:
                             vuosi_data['tyottomyysaste'] = (vuosi_data['tyottomat'] / tyossa * 100)
                         else:
                             vuosi_data['tyottomyysaste'] = 0
                         
-                        # Laske väestötiheys (per km²)
+                        # Väestötiheys (per km²)
                         pinta_ala_km2 = (props.get('pinta_ala') or 0) / 1_000_000
                         if pinta_ala_km2 > 0:
                             vuosi_data['vaestotiheys'] = (vuosi_data['vaesto'] / pinta_ala_km2)
                         else:
                             vuosi_data['vaestotiheys'] = 0
+                        
+                        # Lapsiperheystävällisyys (0-17v osuus väestöstä %)
+                        if vuosi_data['vaesto'] > 0:
+                            lapset = (vuosi_data['ika_0_2'] + vuosi_data['ika_3_6'] + 
+                                     vuosi_data['ika_7_12'] + vuosi_data['ika_13_15'] + 
+                                     vuosi_data['ika_16_17'])
+                            vuosi_data['lapset_osuus'] = round(lapset / vuosi_data['vaesto'] * 100, 1)
+                            tyoikaiset = sum(vuosi_data.get(f'ika_{a}_{b}', 0) 
+                                           for a, b in [(18,19),(20,24),(25,29),(30,34),(35,39),
+                                                        (40,44),(45,49),(50,54),(55,59),(60,64)])
+                            vuosi_data['tyoikaiset_osuus'] = round(tyoikaiset / vuosi_data['vaesto'] * 100, 1)
+                            elakelaiset_ika = (vuosi_data['ika_65_69'] + vuosi_data['ika_70_74'] + 
+                                              vuosi_data['ika_75_79'] + vuosi_data['ika_80_84'] + 
+                                              vuosi_data['ika_85_'])
+                            vuosi_data['elakeikaiset_osuus'] = round(elakelaiset_ika / vuosi_data['vaesto'] * 100, 1)
+                        else:
+                            vuosi_data['lapset_osuus'] = 0
+                            vuosi_data['tyoikaiset_osuus'] = 0
+                            vuosi_data['elakeikaiset_osuus'] = 0
+                        
+                        # Omistusaste (% talouksista)
+                        te_total = vuosi_data['te_omis_as'] + vuosi_data['te_vuok_as'] + vuosi_data['te_muu_as']
+                        if te_total > 0:
+                            vuosi_data['omistusaste'] = round(vuosi_data['te_omis_as'] / te_total * 100, 1)
+                            vuosi_data['vuokra_aste'] = round(vuosi_data['te_vuok_as'] / te_total * 100, 1)
+                        else:
+                            vuosi_data['omistusaste'] = 0
+                            vuosi_data['vuokra_aste'] = 0
+                        
+                        # Koulutusrakenne (% 18+ väestöstä)
+                        ko_total = vuosi_data['koulutustaso']  # ko_ika18y
+                        if ko_total > 0:
+                            vuosi_data['korkeakoulutetut_osuus'] = round(
+                                (vuosi_data['ko_al_kork'] + vuosi_data['ko_yl_kork'] + vuosi_data['ko_yliop']) 
+                                / ko_total * 100, 1)
+                        else:
+                            vuosi_data['korkeakoulutetut_osuus'] = 0
+                        
+                        # Kerrostalo-osuus (% asunnoista)
+                        if vuosi_data['ra_asunn'] > 0:
+                            vuosi_data['kerrostalo_osuus'] = round(vuosi_data['ra_kt_as'] / vuosi_data['ra_asunn'] * 100, 1)
+                        else:
+                            vuosi_data['kerrostalo_osuus'] = 0
+                        
+                        # Toimialarakenne (% kaikista työpaikoista)
+                        tp_total = vuosi_data['tp_tyopy']
+                        if tp_total > 0:
+                            vuosi_data['tp_palvelut_osuus'] = round(
+                                (vuosi_data['tp_g_kaup'] + vuosi_data['tp_i_majo'] + vuosi_data['tp_j_info'] + 
+                                 vuosi_data['tp_k_raho'] + vuosi_data['tp_m_erik'] + vuosi_data['tp_p_koul'] + 
+                                 vuosi_data['tp_q_terv'] + vuosi_data['tp_r_taid'] + vuosi_data['tp_s_muup']) 
+                                / tp_total * 100, 1)
+                            vuosi_data['tp_ict_osuus'] = round(vuosi_data['tp_j_info'] / tp_total * 100, 1)
+                        else:
+                            vuosi_data['tp_palvelut_osuus'] = 0
+                            vuosi_data['tp_ict_osuus'] = 0
                         
                         alueiden_lkm += 1
                 
@@ -245,7 +400,10 @@ if OSMIUM_AVAILABLE:
                     'paivakodit': 0,
                     'liikuntapaikat': 0,
                     'terveysasemat': 0,
-                    'julkinen_liikenne': 0
+                    'julkinen_liikenne': 0,
+                    'ravintolat': 0,
+                    'kahvilat': 0,
+                    'puistot': 0
                 }
             
             self.kasitelty = 0
@@ -280,6 +438,12 @@ if OSMIUM_AVAILABLE:
                 palvelutyyppi = 'terveysasemat'
             elif tags.get('highway') == 'bus_stop' or tags.get('railway') in ['station', 'tram_stop', 'halt']:
                 palvelutyyppi = 'julkinen_liikenne'
+            elif tags.get('amenity') == 'restaurant':
+                palvelutyyppi = 'ravintolat'
+            elif tags.get('amenity') in ['cafe', 'bar']:
+                palvelutyyppi = 'kahvilat'
+            elif tags.get('leisure') == 'park':
+                palvelutyyppi = 'puistot'
             
             if not palvelutyyppi:
                 return
@@ -372,7 +536,10 @@ def hae_palvelut_osm_geofabrik(postinumero_geometriat, osm_tiedosto='finland-lat
             'paivakodit': 1.2,
             'liikuntapaikat': 0.8,
             'terveysasemat': 1.3,
-            'julkinen_liikenne': 0.5
+            'julkinen_liikenne': 0.5,
+            'ravintolat': 0.7,
+            'kahvilat': 0.5,
+            'puistot': 0.6
         }
         
         # Laske alueiden pinta-alat km²

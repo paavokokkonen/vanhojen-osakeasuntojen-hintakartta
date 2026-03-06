@@ -593,6 +593,202 @@ Tässä hintakarttaprojektissa mitataan useita näistä tekijöistä:
 - ⬜ **Korkoympäristö** — yhteinen kaikille alueille, ei alueellista vaihtelua
 - ⬜ **Kaavoitus ja tarjonta** — ei dataa saatavilla
 
+---
+
+## 📊 Tutkimus: Saatavilla oleva postinumerotason data Suomesta
+
+Kattava kartoitus kaikista avoimista ja puoliavoimista datalähteistä, jotka tarjoavat tietoa postinumeroalueittain tai jotka voidaan yhdistää postinumeroalueisiin. Tutkimus tehty 5.3.2026.
+
+### 1. Tilastokeskus: Paavo-tietokanta (WFS API) ⭐ Ensisijainen lähde
+
+**URL:** `https://geo.stat.fi/geoserver/postialue/wfs` (layer `pno_tilasto_XXXX`)
+**Aikasarja:** 2010–2024 (päivittyy tammikuussa)
+**Postinumeroalueita:** ~3 019
+**Kenttiä:** 113 per vuosi
+**Lisenssi:** CC BY 4.0 (avoin)
+
+| Tietoryhmä | Etuliite | Kenttiä | Esimerkkimuuttujat |
+|-----------|---------|--------|-------------------|
+| **Asukasrakenne** | `he_` | 24 | `he_vakiy` (väkiluku), `he_kika` (keski-ikä), `he_miehet`, `he_naiset`, 20 ikäryhmää (0–2, 3–6, 7–12, …, 80–84, 85+) |
+| **Koulutusaste** | `ko_` | 7 | `ko_ika18y` (18+ asukkaat), `ko_perus` (perusaste), `ko_ammat` (ammattikoulutus), `ko_yl_kork` (ylempi korkeakoulututkinto), `ko_al_kork` (alempi kk), `ko_yliop` (tutkijakoulutus), `ko_koul` (koulutustiedot yhteensä) |
+| **Asukkaiden tulot** | `hr_` | 7 | `hr_mtu` (asuntokuntien mediaanitulot), `hr_ktu` (keskitulot), `hr_ovy` (tulot yhteensä), `hr_pi_tul` (pienituloiset), `hr_ke_tul` (keskituloiset), `hr_hy_tul` (hyvätuloiset) |
+| **Talouksien tulot** | `tr_` | 7 | `tr_mtu` (talouksien mediaanitulot), `tr_ktu` (keskitulot), `tr_kuty` (taloustyyppi), `tr_pi_tul`, `tr_ke_tul`, `tr_hy_tul`, `tr_ovy` |
+| **Talouksien koko ja elämänvaihe** | `te_` | 17 | `te_taly` (talouksia yht.), `te_yks` (yksinasuvat), `te_nuor` (nuoret), `te_laps` (lapsiperheet), `te_klap` (kouluikäiset lapset), `te_aklap` (aikuisten lapsiperheet), `te_elak` (eläkeläistaloudet), `te_omis_as` (omistusasunnot), `te_vuok_as` (vuokra-asunnot), `te_takk` (talouden keskikoko), `te_as_valj` (asumisväljyys m²/hlö) |
+| **Rakennukset ja asunnot** | `ra_` | 9 | `ra_raky` (rakennuksia yht.), `ra_asrak` (asuinrakennuksia), `ra_asunn` (asuntoja yht.), `ra_kt_as` (kerrostaloasuntoja), `ra_pt_as` (pientaloasuntoja), `ra_muu_as` (muita asuntoja), `ra_ke` (kesämökkejä), `ra_muut` (muut rakennukset), `ra_as_kpa` (asuntojen keskipinta-ala m²) |
+| **Työpaikat toimialoittain** | `tp_` | 26 | `tp_tyopy` (työpaikkoja yht.), `tp_alku_a` (alkutuotanto), `tp_c_teol` (teollisuus), `tp_f_rake` (rakentaminen), `tp_g_kaup` (kauppa), `tp_h_kulj` (kuljetus), `tp_i_majo` (majoitus/ravintola), `tp_j_info` (ICT), `tp_k_raho` (rahoitus), `tp_m_erik` (erikoispalvelut), `tp_p_koul` (koulutus), `tp_q_terv` (terveys) + 14 muuta toimialaa |
+| **Pääasiallinen toiminta** | `pt_` | 7 | `pt_vakiy` (väestö yht.), `pt_tyoll` (työlliset), `pt_tyott` (työttömät), `pt_opisk` (opiskelijat), `pt_elakel` (eläkeläiset), `pt_muut` (muut), `pt_0_14` (0–14-vuotiaat) |
+| **Sijainti ja geometria** | — | 4 | `euref_x/y` (koordinaatit), `pinta_ala` (m²), `kunta` (kuntakoodi) |
+
+**Käytössä projektissa:** `he_vakiy`, `he_kika`, `pt_tyoll`, `pt_tyott`, `pt_opisk`, `pt_elakel`, `hr_mtu`, `ko_ika18y`, `te_as_valj`
+**Käyttämättä:** ~100 kenttää, mm. koko ikäjakauma, tuloluokat, talouksien elämänvaiheet, rakennuskanta, 26 toimialaa
+
+### 2. Tilastokeskus: StatFin-tietokannat (PxWeb API)
+
+#### 2a. Osakeasuntojen hinnat ✅ Käytössä
+**Taulukko:** `ashi_13mu` (vuosittain) + `ashi_13mt` (neljännesvuosittain)
+**Aikasarja:** 2009–2025
+**Muuttujat:** neliöhinta (€/m²), kauppojen lukumäärä
+**Luokittelu:** postinumeroalue × talotyyppi (kerrostalo yksiöt/kaksiot/kolmiot+, rivitalot)
+
+#### 2b. Vuokrat postinumeroalueittain ✅ Käytössä
+**Taulukko:** `asvu_13eb`
+**Aikasarja:** 2015Q1–2025Q4
+**Muuttujat:** vapaarahoitteisten vuokra-asuntojen keskineliövuokra (€/m²/kk)
+**Luokittelu:** postinumeroalue × huoneluku × neljännes
+
+#### 2c. Vuokraindeksi (alueittain, EI postinumerotasolla)
+**Taulukko:** `asvu_11x4` / `asvu_11x5`
+**Taso:** suuret kaupungit ja seutukunnat
+
+### 3. OpenStreetMap (Geofabrik) ✅ Käytössä
+**Tiedosto:** `finland-latest.osm.pbf` (~676 MB)
+**Parseri:** osmium (Python pyosmium)
+**Postinumerotasolle yhdistäminen:** point-in-polygon tarkistus
+
+**Käytössä olevat tagit:**
+| Kategoria | OSM-tagi |
+|-----------|----------|
+| Kaupat | `shop=supermarket`, `shop=convenience` |
+| Koulut | `amenity=school` |
+| Päiväkodit | `amenity=kindergarten` |
+| Liikuntapaikat | `leisure=fitness_centre`, `leisure=sports_centre` |
+| Terveysasemat | `amenity=doctors`, `amenity=clinic`, `amenity=hospital` |
+| Julkinen liikenne | `highway=bus_stop`, `railway=station/tram_stop/halt` |
+
+**Lisäksi saatavilla OSM:stä (ei vielä käytössä):**
+| Kategoria | OSM-tagi | Relevanssi hintakarttaan |
+|-----------|----------|------------------------|
+| Ravintolat/kahvilat | `amenity=restaurant`, `amenity=cafe`, `amenity=bar` | Korkea — käveltävyys (Pope & Pope 2015) |
+| Puistot/viheralueet | `leisure=park`, `natural=wood`, `landuse=forest` | Korkea — Votsis & Perrels (2016): +3–5 % |
+| Kirjastot | `amenity=library` | Keskitaso — julkiset palvelut |
+| Apteekit | `amenity=pharmacy` | Keskitaso — terveyspalvelut |
+| Pankit/pankkiautomaatit | `amenity=bank`, `amenity=atm` | Matala |
+| Elokuvateatterit | `amenity=cinema` | Matala — vapaa-ajan palvelut |
+| Kirkot/uskonnolliset | `amenity=place_of_worship` | Matala |
+| Parkkipaikat | `amenity=parking` | Matala — autoistumisaste |
+| Latauspisteet | `amenity=charging_station` | Nouseva — sähköautot |
+| Uimapaikat | `leisure=swimming_pool`, `natural=beach` | Matala |
+
+### 4. LIPAS — Liikuntapaikkatietojärjestelmä
+**URL:** `https://lipas.fi/api/sports-places`
+**Ylläpitäjä:** Jyväskylän yliopisto / OKM
+**Sisältö:** Kaikki Suomen liikuntapaikat (n. 40 000 kpl)
+**Kenttä:** `location.postalCode` — suora postinumeroyhdistys
+**Tyypit:** uimahallit, jäähallit, liikuntasalit, kentät, ladut, ulkoilureitit, uimarannat, frisbeegolf-radat jne.
+**Lisenssi:** CC BY 4.0
+**Etu OSM:ään verrattuna:** Virallinen, kattavampi erityisesti ulkoilureiteille ja erikoisliikuntapaikoille
+
+### 5. Digitransit — Joukkoliikennedata
+**URL:** `https://api.digitransit.fi/` (rekisteröinti vaaditaan)
+**Kattavuus:** HSL (PK-seutu), Waltti (Tampere, Turku, Oulu, Kuopio, Lahti, Joensuu ym.), VR
+**Data:**
+- **Reittisuunnittelu:** matka-aika pisteestä A pisteeseen (julkinen liikenne, kävely, pyöräily)
+- **Pysäkit:** kaikki joukkoliikennepysäkit sijainteineen
+- **GTFS-syötteet:** aikatauludata, reittien geometriat
+**Postinumerotasolle:** Laske matka-aika postinumeron centroidista keskustaan → matka-aikaindeksi
+**Relevanssi:** Erittäin korkea — Alonso (1964), Laakso (1997): saavutettavuus on #1 hintaselittäjä
+
+### 6. THL Sotkanet — Terveys- ja hyvinvointidata
+**URL:** `https://sotkanet.fi/sotkanet/fi/api/`
+**Taso:** Kunta ja hyvinvointialue (EI postinumero)
+**Indikaattoreita:** ~3 000 (terveys, sosiaalipalvelut, hyvinvointi)
+**Esimerkkejä:** sairastavuusindeksi, toimeentulotuki, lastensuojeluilmoitukset, mielenterveysindeksi
+**Postinumerotasolle:** Yhdistettävissä kuntakoodin kautta (pno → kunta → Sotkanet), mutta tuo vain kuntatason tarkkuutta
+
+### 7. Verohallinto / Kuntaliitto — Verotiedot
+**Taso:** Kunta
+**Data:**
+- Kiinteistöveroprosentit (yleinen, vakituinen asunto, muu asunto, rakentamaton tontti)
+- Kunnallisvero-% 
+**Postinumerotasolle:** pno → kunta mapping — kaikilla saman kunnan postinumeroilla sama arvo
+**URL:** `https://www.kuntaliitto.fi/talous/kiinteistoveroprosentit`
+
+### 8. Suomen Pankki / EKP — Makrodata
+**Taso:** Koko Suomi (ei alueellista)
+**Data:**
+| Muuttuja | Lähde | Relevanssi |
+|----------|-------|-----------|
+| 12 kk Euribor | Suomen Pankki | Erittäin korkea — ennustemallien input |
+| Asuntolainakannan kasvu | SP rahoitustilastot | Korkea |
+| Kuluttajahintaindeksi | Tilastokeskus (khi) | Korkea — inflaatiokorjaus |
+| Rakennuskustannusindeksi | Tilastokeskus (rki) | Keskitaso |
+**Postinumerotasolle:** Yhteinen kaikille alueille → käytettävissä aikasarjamallien eksogenisenä muuttujana
+
+### 9. Poliisi — Rikostilastot
+**Taso:** Kunta / alue / poliisilaitos
+**Data:** Rikosilmoitukset tyypeittäin (varkaudet, pahoinpitelyt, huumausainerikokset jne.)
+**URL:** PolStat-palvelu
+**Postinumerotasolle:** Vain kuntatason yhdistys. Gibbons (2004): rikostaso vaikuttaa asuntohintoihin −1–3 %.
+
+### 10. Ilmatieteen laitos (FMI) — Ympäristödata
+**URL:** `https://opendata.fmi.fi/wfs`
+**Data:** Lämpötila, tuuli, sademäärä, auringonpaiste, ilmanlaatu (PM2.5, NO2)
+**Taso:** Mittausasemakohtainen (n. 400 asemaa)
+**Postinumerotasolle:** Interpolointi lähimmästä asemasta tai IDW-kerroin → likimääräinen
+**Lisenssi:** CC BY 4.0
+
+### 11. HSY — Pääkaupunkiseutu (Helsinki, Espoo, Vantaa, Kauniainen)
+**URL:** `https://kartta.hsy.fi/geoserver/wfs`
+**Data:** Ilmanlaatu, melualueet, viheralueet, energiankulutus, jätehuolto
+**Taso:** Karttapohjainen (yhdistettävissä postinumeroon spatial join)
+**Rajoitus:** Vain PK-seutu
+
+### 12. Maanmittauslaitos (MML) — Maastotiedot
+**URL:** `https://www.maanmittauslaitos.fi/kartat-ja-paikkatieto/asiantuntevalle-kayttajalle/tuotekuvaukset/maastotietokanta`
+**Data:** Maasto, vesistöt, korkeusmalli, rakennukset (geometria), tiestö
+**Lisenssi:** CC BY 4.0 (avoin)
+**Postinumerotasolle:** Spatial join — esim. vesirajapituus, metsäpinta-ala, korkeuserot
+**Relevanssi:** Matala–keskitaso
+
+### 13. Traficom — Liikennedata
+**Data:** Ajoneuvokanta, liikenneonnettomuudet, liikenneverkot
+**Taso:** Kunta (ajoneuvotilasto), tie-elementti (onnettomuudet)
+**Postinumerotasolle:** Ajoneuvotilasto vain kuntatasolla
+
+### 14. Posti — Postinumerorekisteri
+**URL:** `https://www.posti.fi` (CSV-lataus)
+**Data:** Postinumero, nimi (fi/sv), kunta, maakunta, tyyppi (normaali/PL)
+**Käyttö:** Metatietojen rikastus (kuntatieto, maakunta)
+
+### Yhteenvetotaulukko: Datalähteet prioriteettijärjestyksessä
+
+| # | Datalähde | Taso | Avoin API | Nyt käytössä | Kenttiä | Prioriteetti lisäykselle |
+|---|-----------|------|-----------|-------------|--------|------------------------|
+| 1 | **Paavo WFS** | Postinumero | ✅ | ✅ (9/113) | 113 | ⭐ Hae loput 100+ kenttää |
+| 2 | **StatFin ashi** | Postinumero | ✅ | ✅ | ~10 | ✅ Valmis |
+| 3 | **StatFin asvu** | Postinumero | ✅ | ✅ | ~5 | ✅ Valmis |
+| 4 | **OSM Geofabrik** | Point-in-polygon | ✅ | ✅ (6 kat.) | ∞ | ⭐ Ravintolat, puistot |
+| 5 | **Digitransit** | Reititys | ✅ (rek.) | ⬜ | matka-aika | ⭐ Korkein uusi prioriteetti |
+| 6 | **LIPAS** | Postinumero | ✅ | ⬜ | ~40k paikkaa | Keskitaso |
+| 7 | **Suomen Pankki** | Koko maa | ✅ | ⬜ | Euribor ym. | ⭐ Ennustemallit |
+| 8 | **Kuntaliitto** | Kunta | ✅ | ⬜ | Verot | Keskitaso |
+| 9 | **THL Sotkanet** | Kunta | ✅ | ⬜ | ~3000 | Matala (ei pno) |
+| 10 | **FMI** | Asema | ✅ | ⬜ | Sää/ilma | Matala |
+| 11 | **HSY** | PK-seutu | ✅ | ⬜ | Ympäristö | Matala (rajattu) |
+| 12 | **Poliisi** | Kunta | osittain | ⬜ | Rikokset | Matala (ei pno) |
+| 13 | **MML** | Spatial | ✅ | ⬜ | Maasto | Matala |
+| 14 | **Traficom** | Kunta | ✅ | ⬜ | Ajoneuvot | Matala |
+
+### Konkreettiset suositukset: Mitä lisätä seuraavaksi?
+
+**1. Paavon käyttämättömät kentät (helpoin, suurin hyöty):**
+- Ikäjakauma (20 ikäryhmää) → lapsiperheystävällisyys, eläkeläisalue-tunnistus
+- Tuloluokat (`hr_pi_tul`, `hr_ke_tul`, `hr_hy_tul`) → tulopolarisoituminen
+- Rakennuskanta (`ra_as_kpa`, `ra_kt_as`, `ra_pt_as`) → asuntokannan tyyppi/ikä
+- Työpaikka-aineisto (26 toimialaa) → alueen elinkeinorakenne, ICT-keskittymät
+- Talouksien tyyppi (`te_yks`, `te_laps`, `te_elak`) → elämänvaiheprofiili
+- Omistus vs. vuokra (`te_omis_as`, `te_vuok_as`) → hallintamuotojakauma
+
+**2. OSM-parserin laajentaminen (helppo, data jo ladattu):**
+- Ravintolat + kahvilat → käveltävyysindeksin komponentti
+- Puistot + viheralueet (pinta-ala) → viheralueindeksi (Votsis 2016)
+
+**3. Digitransit matka-aika (kohtalainen työ, korkein uusi arvo):**
+- Matka-aika keskustaan julkisilla → #1 hintaselittäjä kirjallisuuden mukaan
+
+**4. Euribor-aikasarja (helppo, suuri arvo ennusteissa):**
+- Suomen Pankki → SARIMAX-mallin eksogeninen muuttuja
+
 ## Lähdeviitteet
 
 - Asuntohinnat: [Tilastokeskus StatFin](https://stat.fi/) - ashi_13mu

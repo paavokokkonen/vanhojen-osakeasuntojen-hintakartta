@@ -62,6 +62,27 @@ except FileNotFoundError:
     vuokradata = {'data': {}}
     print("  Vuokradata: Ei saatavilla (aja: python lataa_vuokrat.py)")
 
+# Lataa matka-ajat (Digitransit / laskennallinen)
+try:
+    with open('data/matka_ajat.json', 'r', encoding='utf-8') as f:
+        matka_ajat_data = json.load(f)
+    matka_ajat = matka_ajat_data.get('data', {})
+    print(f"  Matka-ajat: {len(matka_ajat)} aluetta ({matka_ajat_data.get('metadata', {}).get('lahde', '?')})")
+except FileNotFoundError:
+    matka_ajat = {}
+    print("  Matka-ajat: Ei saatavilla (aja: python lataa_matka_ajat.py)")
+
+# Lataa Euribor-aikasarja
+try:
+    with open('data/euribor.json', 'r', encoding='utf-8') as f:
+        euribor_data = json.load(f)
+    euribor_vuosittain = euribor_data.get('data', {}).get('vuosittain', {})
+    print(f"  Euribor: {len(euribor_vuosittain)} vuotta ({min(euribor_vuosittain.keys())}-{max(euribor_vuosittain.keys())})")
+except FileNotFoundError:
+    euribor_data = {'data': {'vuosittain': {}}}
+    euribor_vuosittain = {}
+    print("  Euribor: Ei saatavilla (aja: python lataa_euribor.py)")
+
 # Hae metatiedot
 available_years = sorted(data['metadata']['years'])
 building_types = data['metadata']['building_types']
@@ -108,12 +129,19 @@ for feature in geojson_data['features']:
         feature['properties']['vuokra'] = vuokradata['data'][postcode]
     else:
         feature['properties']['vuokra'] = {}
+    
+    # Lisää matka-aika jos saatavilla
+    if postcode in matka_ajat:
+        feature['properties']['matka_aika'] = matka_ajat[postcode]
+    else:
+        feature['properties']['matka_aika'] = {}
 
 # Luo JavaScript-muuttujat
 years_json = json.dumps(available_years)
 building_types_json = json.dumps(building_types)
 geojson_json = json.dumps(geojson_data)
 ennusteet_mallit_json = json.dumps(ennusteet_mallit)
+euribor_json = json.dumps(euribor_vuosittain)
 
 # Laske oletustilastot (viimeisin vuosi, Kaikki-kategoria, hinnat)
 default_prices = []
@@ -777,6 +805,7 @@ html = f'''<!DOCTYPE html>
                 <option value="linear" selected>Lineaarinen</option>
                 <option value="arima">ARIMA</option>
                 <option value="exponential">Exp. Smoothing</option>
+                <option value="sarimax_euribor">SARIMAX-Euribor</option>
             </select>
         </div>
         
@@ -932,6 +961,11 @@ html = f'''<!DOCTYPE html>
                 <input type="range" id="finder-min-palvelu" min="0" max="20" step="0.5" value="0" oninput="document.getElementById('finder-palvelu-val').textContent=this.value === '0' ? 'Ei rajoitusta' : this.value">
                 <div class="finder-range-value" id="finder-palvelu-val">Ei rajoitusta</div>
             </div>
+            <div class="finder-group">
+                <label>🚌 Max matka-aika keskustaan</label>
+                <input type="range" id="finder-max-matka" min="0" max="120" step="5" value="0" oninput="document.getElementById('finder-matka-val').textContent=this.value === '0' ? 'Ei rajoitusta' : this.value+' min'">
+                <div class="finder-range-value" id="finder-matka-val">Ei rajoitusta</div>
+            </div>
             <button class="finder-btn" onclick="runFinderSearch()">🔍 Etsi sopivat alueet</button>
             <button class="finder-reset" onclick="resetFinderSearch()">↩ Nollaa suodattimet</button>
         </div>
@@ -988,6 +1022,18 @@ html = f'''<!DOCTYPE html>
                 <h3>💶 Tulotaso &amp; työttömyys</h3>
                 <canvas id="ts-income-chart"></canvas>
             </div>
+            <div class="ts-chart-section" id="ts-age-section" style="display:none;">
+                <h3>👶 Ikärakenne (%)</h3>
+                <canvas id="ts-age-chart"></canvas>
+            </div>
+            <div class="ts-chart-section" id="ts-housing-section" style="display:none;">
+                <h3>🏗️ Asuntorakenne &amp; hallinta</h3>
+                <canvas id="ts-housing-chart"></canvas>
+            </div>
+            <div class="ts-chart-section" id="ts-euribor-section" style="display:none;">
+                <h3>📈 Hinta vs. Euribor</h3>
+                <canvas id="ts-euribor-chart"></canvas>
+            </div>
         </div>
     </div>
     
@@ -1013,7 +1059,8 @@ html = f'''<!DOCTYPE html>
         var geojsonData = {geojson_json};
         var availableYears = {years_json};
         var buildingTypes = {building_types_json};
-        var ennusteetMallit = {ennusteet_mallit_json};  // Ennustemallit (linear, arima, exponential)
+        var ennusteetMallit = {ennusteet_mallit_json};  // Ennustemallit (linear, arima, exponential, sarimax_euribor)
+        var euriborData = {euribor_json};  // Euribor-aikasarja vuosittain
         var geoJsonLayer;
         var currentLegend;
         
@@ -1275,6 +1322,164 @@ html = f'''<!DOCTYPE html>
                 incSection.style.display = 'none';
             }}
             
+            // 7. Ikärakenne (lapset, työikäiset, eläkeikäiset %)
+            var ageSection = document.getElementById('ts-age-section');
+            if (paavo && Object.keys(paavo).length > 0) {{
+                var hasAge = Object.values(paavo).some(function(v) {{ return v.lapset_osuus !== undefined; }});
+                if (hasAge) {{
+                    ageSection.style.display = 'block';
+                    var ageYears = Object.keys(paavo).sort();
+                    var ageDisplayYears = ageYears.map(function(y) {{ return parseInt(y) - 1; }});
+                    
+                    tsCharts.age = new Chart(document.getElementById('ts-age-chart'), {{
+                        type: 'line',
+                        data: {{
+                            labels: ageDisplayYears,
+                            datasets: [{{
+                                label: 'Lapset 0-17 (%)',
+                                data: ageYears.map(function(y) {{ return paavo[y].lapset_osuus || null; }}),
+                                borderColor: '#3498db',
+                                backgroundColor: '#3498db20',
+                                tension: 0.3,
+                                pointRadius: 3
+                            }}, {{
+                                label: 'Työikäiset 18-64 (%)',
+                                data: ageYears.map(function(y) {{ return paavo[y].tyoikaiset_osuus || null; }}),
+                                borderColor: '#27ae60',
+                                backgroundColor: '#27ae6020',
+                                tension: 0.3,
+                                pointRadius: 3
+                            }}, {{
+                                label: 'Eläkeikäiset 65+ (%)',
+                                data: ageYears.map(function(y) {{ return paavo[y].elakeikaiset_osuus || null; }}),
+                                borderColor: '#e67e22',
+                                backgroundColor: '#e67e2220',
+                                tension: 0.3,
+                                pointRadius: 3
+                            }}]
+                        }},
+                        options: {{
+                            responsive: true,
+                            interaction: {{ mode: 'index', intersect: false }},
+                            plugins: {{ legend: {{ position: 'bottom', labels: {{ boxWidth: 12, font: {{ size: 11 }} }} }} }},
+                            scales: {{ y: {{ title: {{ display: true, text: '%' }}, min: 0, max: 100 }} }}
+                        }}
+                    }});
+                }} else {{
+                    ageSection.style.display = 'none';
+                }}
+            }} else {{
+                ageSection.style.display = 'none';
+            }}
+            
+            // 8. Asuntorakenne & hallinta
+            var housingSection = document.getElementById('ts-housing-section');
+            if (paavo && Object.keys(paavo).length > 0) {{
+                var hasHousing = Object.values(paavo).some(function(v) {{ return v.omistusaste !== undefined; }});
+                if (hasHousing) {{
+                    housingSection.style.display = 'block';
+                    var hYears = Object.keys(paavo).sort();
+                    var hDisplayYears = hYears.map(function(y) {{ return parseInt(y) - 1; }});
+                    
+                    tsCharts.housing = new Chart(document.getElementById('ts-housing-chart'), {{
+                        type: 'line',
+                        data: {{
+                            labels: hDisplayYears,
+                            datasets: [{{
+                                label: 'Omistusaste (%)',
+                                data: hYears.map(function(y) {{ return paavo[y].omistusaste || null; }}),
+                                borderColor: '#27ae60',
+                                backgroundColor: '#27ae6020',
+                                tension: 0.3,
+                                pointRadius: 3,
+                                yAxisID: 'y'
+                            }}, {{
+                                label: 'Vuokra-aste (%)',
+                                data: hYears.map(function(y) {{ return paavo[y].vuokra_aste || null; }}),
+                                borderColor: '#e74c3c',
+                                backgroundColor: '#e74c3c20',
+                                tension: 0.3,
+                                pointRadius: 3,
+                                yAxisID: 'y'
+                            }}, {{
+                                label: 'Kerrostalo (%)',
+                                data: hYears.map(function(y) {{ return paavo[y].kerrostalo_osuus || null; }}),
+                                borderColor: '#9b59b6',
+                                backgroundColor: '#9b59b620',
+                                tension: 0.3,
+                                pointRadius: 3,
+                                borderDash: [5, 5],
+                                yAxisID: 'y'
+                            }}]
+                        }},
+                        options: {{
+                            responsive: true,
+                            interaction: {{ mode: 'index', intersect: false }},
+                            plugins: {{ legend: {{ position: 'bottom', labels: {{ boxWidth: 12, font: {{ size: 11 }} }} }} }},
+                            scales: {{ y: {{ title: {{ display: true, text: '%' }}, min: 0 }} }}
+                        }}
+                    }});
+                }} else {{
+                    housingSection.style.display = 'none';
+                }}
+            }} else {{
+                housingSection.style.display = 'none';
+            }}
+            
+            // 9. Hinta vs. Euribor
+            var euriborSection = document.getElementById('ts-euribor-section');
+            if (euriborData && Object.keys(euriborData).length > 0) {{
+                euriborSection.style.display = 'block';
+                var priceByYear = {{}};
+                var bt0 = '0';  // Kaikki talotyypit
+                availableYears.forEach(function(y) {{
+                    var v = getValue(feature, y, bt0, 'keskihinta_aritm_nw');
+                    if (v) priceByYear[y] = v;
+                }});
+                
+                // Yhdistä vuodet joille on sekä hinta että Euribor
+                var commonYears = Object.keys(priceByYear).filter(function(y) {{ return euriborData[y]; }}).sort();
+                
+                if (commonYears.length > 3) {{
+                    tsCharts.euribor = new Chart(document.getElementById('ts-euribor-chart'), {{
+                        type: 'line',
+                        data: {{
+                            labels: commonYears,
+                            datasets: [{{
+                                label: 'Neliöhinta (€/m²)',
+                                data: commonYears.map(function(y) {{ return priceByYear[y] || null; }}),
+                                borderColor: '#1e3c72',
+                                backgroundColor: '#1e3c7220',
+                                tension: 0.3,
+                                pointRadius: 3,
+                                yAxisID: 'y'
+                            }}, {{
+                                label: '12kk Euribor (%)',
+                                data: commonYears.map(function(y) {{ return euriborData[y] ? euriborData[y].keskiarvo : null; }}),
+                                borderColor: '#e74c3c',
+                                backgroundColor: '#e74c3c20',
+                                tension: 0.3,
+                                pointRadius: 3,
+                                yAxisID: 'y1'
+                            }}]
+                        }},
+                        options: {{
+                            responsive: true,
+                            interaction: {{ mode: 'index', intersect: false }},
+                            plugins: {{ legend: {{ position: 'bottom', labels: {{ boxWidth: 12, font: {{ size: 11 }} }} }} }},
+                            scales: {{
+                                y: {{ position: 'left', title: {{ display: true, text: '€/m²' }} }},
+                                y1: {{ position: 'right', title: {{ display: true, text: 'Euribor %' }}, grid: {{ drawOnChartArea: false }} }}
+                            }}
+                        }}
+                    }});
+                }} else {{
+                    euriborSection.style.display = 'none';
+                }}
+            }} else {{
+                euriborSection.style.display = 'none';
+            }}
+            
             document.getElementById('timeseries-modal').style.display = 'block';
         }}
         
@@ -1456,6 +1661,87 @@ html = f'''<!DOCTYPE html>
             // Muille vuosille käytä tavallista dataa
             if (!data || !data[year] || !data[year][buildingType]) return null;
             return data[year][buildingType][metric] || null;
+        }}
+        
+        // Rakennetaan laajennettu väestö+palvelu -popup-osio
+        function buildExpandedPopup(props, selectedYear) {{
+            var html = '';
+            
+            // Matka-aika
+            if (props.matka_aika && props.matka_aika.matka_aika_min) {{
+                var ma = props.matka_aika;
+                var matkaColor = ma.matka_aika_min <= 20 ? '#27ae60' : ma.matka_aika_min <= 45 ? '#f39c12' : ma.matka_aika_min <= 90 ? '#e67e22' : '#e74c3c';
+                html += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
+                    '<strong>🚌 Matka-aika keskustaan:</strong><br>' +
+                    '🏙️ ' + ma.lahin_keskusta + ': <strong style="color:' + matkaColor + '">' + ma.matka_aika_min + ' min</strong> (' + ma.etaisyys_km + ' km)</div>';
+            }}
+            
+            // Paavo: laajennetut väestötiedot
+            if (props.paavo_aikasarja) {{
+                var targetPaavoVuosi = parseInt(selectedYear) + 1;
+                var vuodet = Object.keys(props.paavo_aikasarja).map(Number).sort(function(a,b) {{ return b-a; }});
+                var paavoVuosi = vuodet.find(function(v) {{ return v <= targetPaavoVuosi; }}) || vuodet[0];
+                var paavo = paavoVuosi ? props.paavo_aikasarja[paavoVuosi] : null;
+                
+                if (paavo && paavo.vaesto) {{
+                    var vuosiLabel = paavoVuosi - 1;
+                    html += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
+                        '<strong>👥 Väestötiedot (' + vuosiLabel + '):</strong><br>' +
+                        'Asukkaat: ' + paavo.vaesto.toLocaleString() + '<br>' +
+                        'Keski-ikä: ' + paavo.keski_ika + ' v<br>' +
+                        'Keskitulo: ' + paavo.keskitulo.toLocaleString() + ' €/v<br>' +
+                        'Työttömyys: ' + paavo.tyottomyysaste.toFixed(1) + ' %<br>' +
+                        'Väestötiheys: ' + paavo.vaestotiheys.toFixed(0) + ' as/km²</div>';
+                    
+                    // Ikärakenne
+                    if (paavo.lapset_osuus !== undefined) {{
+                        html += '<div class="details" style="margin-top: 5px; border-top: 1px solid #eee; padding-top: 3px;">' +
+                            '<strong>👶 Ikärakenne:</strong><br>' +
+                            '👶 Lapset (0-17): ' + paavo.lapset_osuus + ' %<br>' +
+                            '💼 Työikäiset (18-64): ' + paavo.tyoikaiset_osuus + ' %<br>' +
+                            '🧓 Eläkeikäiset (65+): ' + paavo.elakeikaiset_osuus + ' %</div>';
+                    }}
+                    
+                    // Asuntorakenne & hallinta
+                    if (paavo.omistusaste !== undefined) {{
+                        html += '<div class="details" style="margin-top: 5px; border-top: 1px solid #eee; padding-top: 3px;">' +
+                            '<strong>🏗️ Asuntorakenne:</strong><br>' +
+                            '🏢 Kerrostalo: ' + (paavo.kerrostalo_osuus || 0) + ' %<br>' +
+                            '📐 Keskipinta-ala: ' + (paavo.ra_as_kpa || 0) + ' m²<br>' +
+                            '🔑 Omistusasuntoja: ' + paavo.omistusaste + ' % | Vuokra: ' + paavo.vuokra_aste + ' %</div>';
+                    }}
+                    
+                    // Koulutus & työpaikat
+                    if (paavo.korkeakoulutetut_osuus !== undefined) {{
+                        html += '<div class="details" style="margin-top: 5px; border-top: 1px solid #eee; padding-top: 3px;">' +
+                            '<strong>🎓 Koulutus & työ:</strong><br>' +
+                            '🎓 Korkeakoulutetut: ' + paavo.korkeakoulutetut_osuus + ' %<br>' +
+                            '💻 ICT-työpaikat: ' + (paavo.tp_ict_osuus || 0) + ' %<br>' +
+                            '🏭 Palveluala: ' + (paavo.tp_palvelut_osuus || 0) + ' %</div>';
+                    }}
+                }}
+            }}
+            
+            // Palvelut (laajennettu)
+            if (props.palvelut && Object.keys(props.palvelut).length > 0) {{
+                var p = props.palvelut;
+                if (p.kaupat !== undefined && p.palveluindeksi > 0) {{
+                    html += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
+                        '<strong>🏪 Palvelut (postinumeroalueella):</strong><br>' +
+                        '🛒 Kaupat: ' + p.kaupat + '&nbsp;&nbsp;🏫 Koulut: ' + p.koulut + '&nbsp;&nbsp;🧒 Päiväkodit: ' + p.paivakodit + '<br>' +
+                        '💪 Liikunta: ' + p.liikuntapaikat + '&nbsp;&nbsp;🏥 Terveys: ' + p.terveysasemat + '&nbsp;&nbsp;🚌 Liikenne: ' + p.julkinen_liikenne + '<br>' +
+                        '🍽️ Ravintolat: ' + (p.ravintolat || 0) + '&nbsp;&nbsp;☕ Kahvilat: ' + (p.kahvilat || 0) + '&nbsp;&nbsp;🌳 Puistot: ' + (p.puistot || 0) + '<br>' +
+                        '⭐ Palveluindeksi: ' + p.palveluindeksi.toFixed(1) + '</div>';
+                }}
+            }}
+            
+            // Euribor
+            if (euriborData && euriborData[selectedYear]) {{
+                html += '<div class="details" style="margin-top: 5px; border-top: 1px solid #eee; padding-top: 3px; color: #888; font-size: 11px;">' +
+                    '📈 12kk Euribor (' + selectedYear + '): ' + euriborData[selectedYear].keskiarvo.toFixed(2) + ' %</div>';
+            }}
+            
+            return html;
         }}
         
         // Yleinen mittarin arvon haku - reitittää oikeaan getter-funktioon
@@ -1665,6 +1951,7 @@ html = f'''<!DOCTYPE html>
                                 '📐 60m² asunto: ' + (priceVal * 60).toLocaleString() + ' €<br>' +
                                 '💶 Keskitulo: ' + tuloVal.toLocaleString() + ' €/v<br>' +
                                 '📊 Suhde: <strong>' + ratioVal.toFixed(1) + ' vuoden palkat</strong></div>' +
+                                buildExpandedPopup(props, selectedYear) +
                                 '</div>';
                         }} else {{
                             popupContent = '<div class="popup-content">' +
@@ -1690,6 +1977,7 @@ html = f'''<!DOCTYPE html>
                                 '🔑 Vuokra: ' + rentVal.toFixed(2) + ' €/m²/kk<br>' +
                                 '💰 Vuosivuokra: ' + (rentVal * 12).toFixed(0) + ' €/m²/v<br>' +
                                 '📈 Bruttovuokratuotto: <strong>' + yieldVal.toFixed(2) + ' %</strong></div>' +
+                                buildExpandedPopup(props, selectedYear) +
                                 '</div>';
                         }} else {{
                             popupContent = '<div class="popup-content">' +
@@ -1709,47 +1997,6 @@ html = f'''<!DOCTYPE html>
                             '<div class="details">' + props.name + '</div>' +
                             '<div class="details">' + selectedYear + ' | ' + buildingTypes[buildingType] + '</div>';
                         
-                        // Lisää väestötiedot jos saatavilla
-                        if (props.paavo_aikasarja) {{
-                            // Paavo-data on -1v (pno_tilasto_2025 = 31.12.2024)
-                            // Joten asuntohintavuoteen lisätään +1 kun haetaan väestötietoja
-                            var targetPaavoVuosi = parseInt(selectedYear) + 1;
-                            var vuodet = Object.keys(props.paavo_aikasarja).map(Number).sort((a, b) => b - a);
-                            var maxPaavoVuosi = vuodet[0]; // Suurin saatavilla oleva vuosi
-                            
-                            if (props.paavo_aikasarja[targetPaavoVuosi]) {{
-                                // Löytyi tarkka vuosi
-                                var paavo = props.paavo_aikasarja[targetPaavoVuosi];
-                                popupContent += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
-                                    '<strong>👥 Väestötiedot (' + selectedYear + '):</strong><br>' +
-                                    'Asukkaat: ' + paavo.vaesto.toLocaleString() + '<br>' +
-                                    'Keski-ikä: ' + paavo.keski_ika + ' v<br>' +
-                                    'Keskitulo: ' + paavo.keskitulo.toLocaleString() + ' €/v<br>' +
-                                    'Työttömyys: ' + paavo.tyottomyysaste.toFixed(1) + ' %<br>' +
-                                    'Väestötiheys: ' + paavo.vaestotiheys.toFixed(0) + ' as/km²</div>';
-                            }} else if (targetPaavoVuosi > maxPaavoVuosi) {{
-                                // Tarvittava vuosi on tulevaisuudessa, ei vielä julkaistu
-                                var julkaisuVuosi = targetPaavoVuosi; // pno_tilasto_XXXX julkaistaan vuonna XXXX
-                                popupContent += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
-                                    '<strong>👥 Väestötiedot (' + selectedYear + '):</strong><br>' +
-                                    '<em style="color: #999;">Tietoja ei ole vielä julkaistu<br>(julkaistaan arviolta ' + julkaisuVuosi + ')</em></div>';
-                            }} else {{
-                                // Käytetään lähintä vanhempaa dataa
-                                var paavoVuosi = vuodet.find(v => v <= targetPaavoVuosi);
-                                if (paavoVuosi && props.paavo_aikasarja[paavoVuosi]) {{
-                                    var paavo = props.paavo_aikasarja[paavoVuosi];
-                                    var naytettavaVuosi = paavoVuosi - 1; // Muunna takaisin asuntohintavuodeksi
-                                    popupContent += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
-                                        '<strong>👥 Väestötiedot (' + naytettavaVuosi + '):</strong><br>' +
-                                        'Asukkaat: ' + paavo.vaesto.toLocaleString() + '<br>' +
-                                        'Keski-ikä: ' + paavo.keski_ika + ' v<br>' +
-                                        'Keskitulo: ' + paavo.keskitulo.toLocaleString() + ' €/v<br>' +
-                                        'Työttömyys: ' + paavo.tyottomyysaste.toFixed(1) + ' %<br>' +
-                                        'Väestötiheys: ' + paavo.vaestotiheys.toFixed(0) + ' as/km²</div>';
-                                }}
-                            }}
-                        }}
-                        
                         // Lisää vuokratiedot jos saatavilla
                         var rentVal = getVuokra(feature, selectedYear, buildingType);
                         if (rentVal && isPrice) {{
@@ -1763,21 +2010,8 @@ html = f'''<!DOCTYPE html>
                             popupContent += '</div>';
                         }}
                         
-                        // Lisää palvelutiedot jos saatavilla
-                        if (props.palvelut && Object.keys(props.palvelut).length > 0) {{
-                            var palvelut = props.palvelut;
-                            if (palvelut.kaupat !== undefined && palvelut.palveluindeksi > 0) {{
-                                popupContent += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
-                                    '<strong>🏪 Palvelut (postinumeroalueella):</strong><br>' +
-                                    '🛒 Kaupat: ' + palvelut.kaupat + '<br>' +
-                                    '🏫 Koulut: ' + palvelut.koulut + '<br>' +
-                                    '🧒 Päiväkodit: ' + palvelut.paivakodit + '<br>' +
-                                    '💪 Liikuntapaikat: ' + palvelut.liikuntapaikat + '<br>' +
-                                    '🏥 Terveysasemat: ' + palvelut.terveysasemat + '<br>' +
-                                    '🚌 Julk. liikenne: ' + palvelut.julkinen_liikenne + '<br>' +
-                                    '⭐ Palveluindeksi: ' + palvelut.palveluindeksi.toFixed(1) + '</div>';
-                            }}
-                        }}
+                        // Laajennetut väestö-, palvelu- ja matka-aikatiedot
+                        popupContent += buildExpandedPopup(props, selectedYear);
                         
                         popupContent += '</div>';
                     }} else {{
@@ -1786,58 +2020,8 @@ html = f'''<!DOCTYPE html>
                             '<div class="details">' + props.name + '</div>' +
                             '<div class="details" style="color: #999; font-style: italic;">Ei kauppoja (' + selectedYear + ' | ' + buildingTypes[buildingType] + ')</div>';
                         
-                        // Lisää väestötiedot myös kun ei kauppoja
-                        if (props.paavo_aikasarja) {{
-                            // Paavo-data on -1v (pno_tilasto_2025 = 31.12.2024)
-                            var targetPaavoVuosi = parseInt(selectedYear) + 1;
-                            var vuodet = Object.keys(props.paavo_aikasarja).map(Number).sort((a, b) => b - a);
-                            var maxPaavoVuosi = vuodet[0];
-                            
-                            if (props.paavo_aikasarja[targetPaavoVuosi]) {{
-                                var paavo = props.paavo_aikasarja[targetPaavoVuosi];
-                                popupContent += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
-                                    '<strong>👥 Väestötiedot (' + selectedYear + '):</strong><br>' +
-                                    'Asukkaat: ' + paavo.vaesto.toLocaleString() + '<br>' +
-                                    'Keski-ikä: ' + paavo.keski_ika + ' v<br>' +
-                                    'Keskitulo: ' + paavo.keskitulo.toLocaleString() + ' €/v<br>' +
-                                    'Työttömyys: ' + paavo.tyottomyysaste.toFixed(1) + ' %<br>' +
-                                    'Väestötiheys: ' + paavo.vaestotiheys.toFixed(0) + ' as/km²</div>';
-                            }} else if (targetPaavoVuosi > maxPaavoVuosi) {{
-                                var julkaisuVuosi = targetPaavoVuosi;
-                                popupContent += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
-                                    '<strong>👥 Väestötiedot (' + selectedYear + '):</strong><br>' +
-                                    '<em style="color: #999;">Tietoja ei ole vielä julkaistu<br>(julkaistaan arviolta ' + julkaisuVuosi + ')</em></div>';
-                            }} else {{
-                                var paavoVuosi = vuodet.find(v => v <= targetPaavoVuosi);
-                                if (paavoVuosi && props.paavo_aikasarja[paavoVuosi]) {{
-                                    var paavo = props.paavo_aikasarja[paavoVuosi];
-                                    var naytettavaVuosi = paavoVuosi - 1;
-                                    popupContent += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
-                                        '<strong>👥 Väestötiedot (' + naytettavaVuosi + '):</strong><br>' +
-                                        'Asukkaat: ' + paavo.vaesto.toLocaleString() + '<br>' +
-                                        'Keski-ikä: ' + paavo.keski_ika + ' v<br>' +
-                                        'Keskitulo: ' + paavo.keskitulo.toLocaleString() + ' €/v<br>' +
-                                        'Työttömyys: ' + paavo.tyottomyysaste.toFixed(1) + ' %<br>' +
-                                        'Väestötiheys: ' + paavo.vaestotiheys.toFixed(0) + ' as/km²</div>';
-                                }}
-                            }}
-                        }}
-                        
-                        // Lisää palvelutiedot myös kun ei kauppoja
-                        if (props.palvelut && Object.keys(props.palvelut).length > 0) {{
-                            var palvelut = props.palvelut;
-                            if (palvelut.kaupat !== undefined && palvelut.palveluindeksi > 0) {{
-                                popupContent += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
-                                    '<strong>🏪 Palvelut (postinumeroalueella):</strong><br>' +
-                                    '🛒 Kaupat: ' + palvelut.kaupat + '<br>' +
-                                    '🏫 Koulut: ' + palvelut.koulut + '<br>' +
-                                    '🧒 Päiväkodit: ' + palvelut.paivakodit + '<br>' +
-                                    '💪 Liikuntapaikat: ' + palvelut.liikuntapaikat + '<br>' +
-                                    '🏥 Terveysasemat: ' + palvelut.terveysasemat + '<br>' +
-                                    '🚌 Julk. liikenne: ' + palvelut.julkinen_liikenne + '<br>' +
-                                    '⭐ Palveluindeksi: ' + palvelut.palveluindeksi.toFixed(1) + '</div>';
-                            }}
-                        }}
+                        // Laajennetut tiedot myös kun ei kauppoja
+                        popupContent += buildExpandedPopup(props, selectedYear);
                         
                         popupContent += '</div>';
                     }}
@@ -2683,6 +2867,8 @@ html = f'''<!DOCTYPE html>
             document.getElementById('finder-liikunta').checked = false;
             document.getElementById('finder-terveys').checked = false;
             document.getElementById('finder-liikenne').checked = false;
+            document.getElementById('finder-max-matka').value = 0;
+            document.getElementById('finder-matka-val').textContent = 'Ei rajoitusta';
             document.getElementById('finder-results').innerHTML = '';
             // Palauta kartan tyylit
             clearFinderHighlight();
@@ -2702,6 +2888,7 @@ html = f'''<!DOCTYPE html>
             var maxPrice = parseFloat(document.getElementById('finder-max-price').value);
             var minPop = parseInt(document.getElementById('finder-min-pop').value);
             var minPalvelu = parseFloat(document.getElementById('finder-min-palvelu').value);
+            var maxMatka = parseInt(document.getElementById('finder-max-matka').value);
             
             var reqKaupat = document.getElementById('finder-kaupat').checked;
             var reqKoulut = document.getElementById('finder-koulut').checked;
@@ -2741,6 +2928,10 @@ html = f'''<!DOCTYPE html>
                 var pIdx = palvelut.palveluindeksi || 0;
                 if (minPalvelu > 0 && pIdx < minPalvelu) return;
                 
+                // Matka-aika
+                var matkaAika = props.matka_aika ? (props.matka_aika.matka_aika_min || 0) : 0;
+                if (maxMatka > 0 && matkaAika > maxMatka) return;
+                
                 results.push({{
                     zip: props.postinumer,
                     name: props.name,
@@ -2748,6 +2939,7 @@ html = f'''<!DOCTYPE html>
                     price: price,
                     pop: pop,
                     palveluindeksi: pIdx,
+                    matkaAika: matkaAika,
                     feature: feature
                 }});
             }});
@@ -2781,7 +2973,7 @@ html = f'''<!DOCTYPE html>
                         '</div>' +
                         '<div class="finder-result-value">' +
                         '<div class="fr-price">' + r.price.toLocaleString() + ' \u20ac/m\u00b2</div>' +
-                        '<div class="fr-services">' + (r.palveluindeksi > 0 ? '\u2b50 ' + r.palveluindeksi.toFixed(1) : '') + '</div>' +
+                        '<div class="fr-services">' + (r.palveluindeksi > 0 ? '\u2b50 ' + r.palveluindeksi.toFixed(1) : '') + (r.matkaAika > 0 ? ' 🚌 ' + r.matkaAika + ' min' : '') + '</div>' +
                         '</div></div>';
                 }}
                 if (results.length > 50) {{
