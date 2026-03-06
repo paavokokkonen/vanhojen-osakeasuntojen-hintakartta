@@ -76,14 +76,17 @@ Interaktiivinen kartta Suomen asuntojen keskihinnoista ja kauppamääristä post
 
 ### 🏪 Palvelutiedot (OpenStreetMap)
 - **Datalähde:** Geofabrik finland-latest.osm.pbf (~676 MB, päivittyy päivittäin)
-- **Laskentamenetelmä:** Point-in-polygon tarkistus postinumeroalueen tarkoilla rajoilla (osmium-parseri)
-- **Palvelukategoriat:** (6 kpl)
-  - 🛒 Kaupat (`shop=supermarket`, `shop=convenience`)
+- **Laskentamenetelmä:** Point-in-polygon tarkistus postinumeroalueen tarkoilla rajoilla (osmium-parseri, nodet + wayt)
+- **Palvelukategoriat:** (9 kpl)
+  - 🛒 Kaupat (`shop=supermarket`, `shop=convenience`) — **TODO:** Harkitse nimen muutosta "Ruokakaupat", koska tagit kattavat vain supermarketit ja lähikaupat, ei muuta vähittäiskauppaa
   - 🏫 Koulut (`amenity=school`)
   - 🧒 Päiväkodit (`amenity=kindergarten`)
   - 💪 Liikuntapaikat (`leisure=fitness_centre`, `leisure=sports_centre`)
   - 🏥 Terveysasemat (`amenity=doctors`, `amenity=clinic`, `amenity=hospital`)
   - 🚌 Julkinen liikenne (`highway=bus_stop`, `railway=station`, `railway=tram_stop`, `railway=halt`)
+  - 🍽️ Ravintolat (`amenity=restaurant`) — *uusi 6.3.2026*
+  - ☕ Kahvilat (`amenity=cafe`, `amenity=bar`) — *uusi 6.3.2026*
+  - 🌳 Puistot (`leisure=park`) — *uusi 6.3.2026*
 - **Palveluindeksi** — tiheyyspohjainen, logaritmisesti skaalattu:
   ```
   palveluindeksi = Σ wₖ · ln(1 + nₖ / A)
@@ -96,10 +99,14 @@ Interaktiivinen kartta Suomen asuntojen keskihinnoista ja kauppamääristä post
   | Päiväkodit | 1.2 |
   | Kaupat | 1.0 |
   | Liikuntapaikat | 0.8 |
+  | Ravintolat | 0.7 |
+  | Puistot | 0.6 |
   | Julkinen liikenne | 0.5 |
+  | Kahvilat | 0.5 |
 
   Logaritminen skaalaus ja pinta-alanormalisointi estävät suurten maaseutualueiden raakamäärien (esim. sadat bussipysäkit pitkien teiden varrella) dominointia. Tyypilliset arvot: 0–15 (Helsinki kantakaupunki ~10–15, kaupunkikeskustat ~5–8, maaseutu <1).
-- **Kattavuus:** 1134/1723 postinumeroalueella palvelutietoja (66%)
+- **Kattavuus:** 1715/1723 postinumeroalueella palvelutietoja (99.5%)
+- **OSM-elementtityypit:** Parseri käsittelee sekä node- että way-elementit (6.3.2026 korjaus — pelkkä node-parsinta jätti 36–98% palveluista huomioimatta kategoriasta riippuen)
 - **Huom:** Palvelut ovat snapshot nykyhetkestä, ei aikasarjaa
 
 ### 🔮 Ennusteet ja mallit
@@ -935,6 +942,10 @@ Kattava kartoitus kaikista avoimista ja puoliavoimista datalähteistä, jotka ta
 - ECB Statistical Data Warehouse, 2005–2026
 - SARIMAX(1,1,1) ennustemalli eksogenisena muuttujana
 - Hinta vs. Euribor -aikasarjakaavio
+
+**5. Seuraavat korjaukset / kehitysideat**
+- 🐛 **Tarkista ICT-työpaikat ja palveluala-osuudet** — popupissa näyttää nollaa, vaikka Paavo-data haetaan. Selvitä johtuuko kenttien nimistä (tp_tyopy vs. tp_ict), puuttuvasta datasta vai laskentavirheestä.
+- 🏷️ **Nimeä "Kaupat" → "Ruokakaupat"** — nykyiset OSM-tagit (`shop=supermarket`, `shop=convenience`) kattavat vain ruokakaupat. Käyttäjä saattaa odottaa ostoskeskuksen kaikkia liikkeitä, mutta niitä ei lasketa.
 
 ## Lähdeviitteet
 
