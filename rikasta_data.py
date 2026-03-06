@@ -16,6 +16,7 @@ import math
 from xml.etree import ElementTree as ET
 from shapely.geometry import shape, Point
 from shapely.ops import nearest_points
+from shapely import STRtree
 import math
 
 try:
@@ -384,12 +385,18 @@ def lataa_osm_tiedosto(tiedostonimi='finland-latest.osm.pbf'):
 if OSMIUM_AVAILABLE:
     class PalveluHandler(osmium.SimpleHandler):
         """
-        Osmium handler joka kerää palvelutiedot kaikilta postinumeroalueilta
-        Käyttää postinumeroalueiden tarkkoja geometrioita (point-in-polygon)
+        Osmium handler joka kerää palvelutiedot kaikilta postinumeroalueilta.
+        Käsittelee sekä nodet että wayt (rakennukset, alueet).
+        Käyttää postinumeroalueiden tarkkoja geometrioita (point-in-polygon).
         """
         def __init__(self, postinumero_geometriat):
             super().__init__()
             self.postinumero_geometriat = postinumero_geometriat
+            
+            # Rakenna spatiaalinen indeksi nopeaa point-in-polygon hakua varten
+            self.pno_lista = list(postinumero_geometriat.keys())
+            self.geom_lista = [postinumero_geometriat[pno] for pno in self.pno_lista]
+            self.strtree = STRtree(self.geom_lista)
             
             # Alusta palvelulaskurit jokaiselle alueelle
             self.palvelut = {}
@@ -406,53 +413,92 @@ if OSMIUM_AVAILABLE:
                     'puistot': 0
                 }
             
-            self.kasitelty = 0
+            self.kasitelty_nodet = 0
+            self.kasitelty_wayt = 0
+            self.loytyneet_nodet = 0
+            self.loytyneet_wayt = 0
+        
+        def _luokittele(self, tags):
+            """Luokittele OSM-elementti palvelutyypiksi tagien perusteella."""
+            t = {tag.k: tag.v for tag in tags}
+            
+            if t.get('shop') in ['supermarket', 'convenience']:
+                return 'kaupat'
+            elif t.get('amenity') == 'school':
+                return 'koulut'
+            elif t.get('amenity') == 'kindergarten':
+                return 'paivakodit'
+            elif t.get('leisure') in ['fitness_centre', 'sports_centre']:
+                return 'liikuntapaikat'
+            elif t.get('amenity') in ['doctors', 'clinic', 'hospital']:
+                return 'terveysasemat'
+            elif t.get('highway') == 'bus_stop' or t.get('railway') in ['station', 'tram_stop', 'halt']:
+                return 'julkinen_liikenne'
+            elif t.get('amenity') == 'restaurant':
+                return 'ravintolat'
+            elif t.get('amenity') in ['cafe', 'bar']:
+                return 'kahvilat'
+            elif t.get('leisure') == 'park':
+                return 'puistot'
+            return None
+        
+        def _kohdista_alueeseen(self, lat, lon, palvelutyyppi):
+            """Kohdista piste postinumeroalueeseen käyttäen STRtree-indeksiä."""
+            point = Point(lon, lat)  # Shapely käyttää (lon, lat) järjestystä
+            # Hae kandidaatit STRtree:stä (bounding box -haku)
+            kandidaatit = self.strtree.query(point)
+            for idx in kandidaatit:
+                if point.within(self.geom_lista[idx]):
+                    pno = self.pno_lista[idx]
+                    self.palvelut[pno][palvelutyyppi] += 1
+                    return True
+            return False
         
         def node(self, n):
             """Käsitellään jokainen OSM-node"""
-            # Ohita nodet ilman tageja
             if not n.tags:
                 return
             
-            self.kasitelty += 1
-            if self.kasitelty % 100000 == 0:
-                print(f"\r   Käsitelty {self.kasitelty:,} nodea...", end='')
-            
-            node_lat = n.location.lat
-            node_lon = n.location.lon
-            point = Point(node_lon, node_lat)  # Shapely käyttää (lon, lat) järjestystä
-            
-            # Tarkista mihin palveluluokkaan kuuluu
-            tags = {tag.k: tag.v for tag in n.tags}
-            palvelutyyppi = None
-            
-            if tags.get('shop') in ['supermarket', 'convenience']:
-                palvelutyyppi = 'kaupat'
-            elif tags.get('amenity') == 'school':
-                palvelutyyppi = 'koulut'
-            elif tags.get('amenity') == 'kindergarten':
-                palvelutyyppi = 'paivakodit'
-            elif tags.get('leisure') in ['fitness_centre', 'sports_centre']:
-                palvelutyyppi = 'liikuntapaikat'
-            elif tags.get('amenity') in ['doctors', 'clinic', 'hospital']:
-                palvelutyyppi = 'terveysasemat'
-            elif tags.get('highway') == 'bus_stop' or tags.get('railway') in ['station', 'tram_stop', 'halt']:
-                palvelutyyppi = 'julkinen_liikenne'
-            elif tags.get('amenity') == 'restaurant':
-                palvelutyyppi = 'ravintolat'
-            elif tags.get('amenity') in ['cafe', 'bar']:
-                palvelutyyppi = 'kahvilat'
-            elif tags.get('leisure') == 'park':
-                palvelutyyppi = 'puistot'
-            
+            palvelutyyppi = self._luokittele(n.tags)
             if not palvelutyyppi:
                 return
             
-            # Tarkista mihin postinumeroalueeseen piste kuuluu (point-in-polygon)
-            for pno, geom in self.postinumero_geometriat.items():
-                if point.within(geom):
-                    self.palvelut[pno][palvelutyyppi] += 1
-                    break  # Piste voi kuulua vain yhteen alueeseen
+            self.kasitelty_nodet += 1
+            if self.kasitelty_nodet % 1000 == 0:
+                print(f"\r   Käsitelty {self.kasitelty_nodet:,} nodea, {self.kasitelty_wayt:,} wayta...", end='')
+            
+            if self._kohdista_alueeseen(n.location.lat, n.location.lon, palvelutyyppi):
+                self.loytyneet_nodet += 1
+        
+        def way(self, w):
+            """Käsitellään jokainen OSM-way (rakennukset, alueet)"""
+            if not w.tags:
+                return
+            
+            palvelutyyppi = self._luokittele(w.tags)
+            if not palvelutyyppi:
+                return
+            
+            self.kasitelty_wayt += 1
+            if self.kasitelty_wayt % 1000 == 0:
+                print(f"\r   Käsitelty {self.kasitelty_nodet:,} nodea, {self.kasitelty_wayt:,} wayta...", end='')
+            
+            # Laske wayn centroid sen nodejen koordinaateista
+            try:
+                lats = []
+                lons = []
+                for node in w.nodes:
+                    if node.location.valid():
+                        lats.append(node.location.lat)
+                        lons.append(node.location.lon)
+                
+                if lats:
+                    centroid_lat = sum(lats) / len(lats)
+                    centroid_lon = sum(lons) / len(lons)
+                    if self._kohdista_alueeseen(centroid_lat, centroid_lon, palvelutyyppi):
+                        self.loytyneet_wayt += 1
+            except Exception:
+                pass  # Ohita wayt joiden nodejen sijainteja ei voida selvittää
 
 
 def lataa_postinumeroalueiden_geometriat(geojson_file='postinumerot_hinnat.geojson'):
@@ -523,9 +569,10 @@ def hae_palvelut_osm_geofabrik(postinumero_geometriat, osm_tiedosto='finland-lat
     handler = PalveluHandler(postinumero_geometriat)
     
     try:
-        print(f"   Parsitaan OSM-tiedosto...")
-        handler.apply_file(osm_tiedosto)
-        print(f"\n   [OK] Kasitelty {handler.kasitelty:,} nodea")
+        print(f"   Parsitaan OSM-tiedosto (nodet + wayt)...")
+        handler.apply_file(osm_tiedosto, locations=True)
+        print(f"\n   [OK] Palvelu-nodet: {handler.kasitelty_nodet:,} (kohdistettu: {handler.loytyneet_nodet:,})")
+        print(f"   [OK] Palvelu-wayt: {handler.kasitelty_wayt:,} (kohdistettu: {handler.loytyneet_wayt:,})")
         
         # Laske palveluindeksi jokaiselle alueelle
         # Käytetään tiheyttä (palvelut/km²) ja logaritmista skaalausta
