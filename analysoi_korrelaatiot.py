@@ -5,9 +5,12 @@ Analysoi korrelaatiot asuntohintojen ja muiden muuttujien välillä
 """
 
 import json
+import warnings
 import numpy as np
 from scipy import stats
 import pandas as pd
+
+warnings.filterwarnings('ignore', category=stats.ConstantInputWarning)
 
 def laske_korrelaatiot(asuntohinnat, rikastettu_data):
     """
@@ -35,11 +38,21 @@ def laske_korrelaatiot(asuntohinnat, rikastettu_data):
         
         # Hae rikastettu data
         rikastettu = rikastettu_data.get(postinumero, {})
-        paavo = rikastettu.get('paavo', {})
+        paavo_vuodet = rikastettu.get('paavo', {})
         etaisyydet = rikastettu.get('etaisyydet', {})
         palvelut = rikastettu.get('palvelut', {})
         
-        # Jos ei ole riittävästi dataa, jatka seuraavaan
+        # Paavo-data on vuositasolla — hae uusin vuosi
+        if not paavo_vuodet:
+            continue
+        
+        # Valitse uusin vuosi jossa on dataa
+        paavo = {}
+        for v in sorted(paavo_vuodet.keys(), reverse=True):
+            if isinstance(paavo_vuodet[v], dict) and paavo_vuodet[v].get('vaesto'):
+                paavo = paavo_vuodet[v]
+                break
+        
         if not paavo:
             continue
         
@@ -89,14 +102,23 @@ def laske_korrelaatiot(asuntohinnat, rikastettu_data):
     korrelaatiot = {}
     
     for muuttuja, label in muuttujat.items():
-        # Poista rivit joissa on puuttuvia arvoja
+        # Poista rivit joissa on puuttuvia arvoja tai nollia
         valid_data = df[['hinta', muuttuja]].dropna()
+        valid_data = valid_data[valid_data[muuttuja] != 0]
         
         if len(valid_data) < 10:
             continue
         
+        # Ohita vakioarvoiset sarakkeet
+        if valid_data[muuttuja].std() == 0:
+            continue
+        
         # Laske Pearsonin korrelaatiokerroin
         r, p_value = stats.pearsonr(valid_data['hinta'], valid_data[muuttuja])
+        
+        # Ohita jos tulos on nan (esim. vakioarvoinen sarake)
+        if np.isnan(r):
+            continue
         
         # Luokittele voimakkuus
         abs_r = abs(r)
@@ -119,9 +141,9 @@ def laske_korrelaatiot(asuntohinnat, rikastettu_data):
         
         korrelaatiot[muuttuja] = {
             'label': label,
-            'r': round(r, 3),
-            'p_value': round(p_value, 6) if p_value is not None else None,
-            'merkitseva': p_value < 0.05 if p_value is not None else False,
+            'r': round(float(r), 3),
+            'p_value': round(float(p_value), 6) if p_value is not None else None,
+            'merkitseva': bool(p_value < 0.05) if p_value is not None else False,
             'voimakkuus': voimakkuus,
             'suunta': suunta,
             'kuvaus': f"{voimakkuus} {suunta}",

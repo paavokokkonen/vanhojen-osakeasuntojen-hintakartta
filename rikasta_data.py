@@ -410,7 +410,9 @@ if OSMIUM_AVAILABLE:
                     'julkinen_liikenne': 0,
                     'ravintolat': 0,
                     'kahvilat': 0,
-                    'puistot': 0
+                    'puistot': 0,
+                    'kirjastot': 0,
+                    'apteekit': 0
                 }
             
             self.kasitelty_nodet = 0
@@ -440,6 +442,10 @@ if OSMIUM_AVAILABLE:
                 return 'kahvilat'
             elif t.get('leisure') == 'park':
                 return 'puistot'
+            elif t.get('amenity') == 'library':
+                return 'kirjastot'
+            elif t.get('amenity') == 'pharmacy':
+                return 'apteekit'
             return None
         
         def _kohdista_alueeseen(self, lat, lon, palvelutyyppi):
@@ -586,7 +592,9 @@ def hae_palvelut_osm_geofabrik(postinumero_geometriat, osm_tiedosto='finland-lat
             'julkinen_liikenne': 0.5,
             'ravintolat': 0.7,
             'kahvilat': 0.5,
-            'puistot': 0.6
+            'puistot': 0.6,
+            'kirjastot': 1.0,
+            'apteekit': 1.1
         }
         
         # Laske alueiden pinta-alat km²

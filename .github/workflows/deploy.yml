@@ -46,14 +46,23 @@ jobs:
     - name: Hae väestötiedot ja palvelutiedot
       run: python rikasta_data.py
     
+    - name: Hae vuokradata
+      run: python lataa_vuokrat.py
+    
     - name: Laske trendianalyysi
       run: python laske_trendianalyysi.py
     
     - name: Laske ennusteet
       run: python laske_ennusteet.py
     
-    - name: Hae vuokradata
-      run: python lataa_vuokrat.py
+    - name: Hae matka-ajat
+      run: python lataa_matka_ajat.py
+    
+    - name: Hae Euribor-aikasarja
+      run: python lataa_euribor.py
+    
+    - name: Laske korrelaatiot
+      run: python analysoi_korrelaatiot.py
     
     - name: Luo interaktiivinen kartta
       run: python kartta_polygon.py

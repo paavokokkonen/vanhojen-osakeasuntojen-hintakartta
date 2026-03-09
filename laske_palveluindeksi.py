@@ -36,7 +36,12 @@ painot = {
     'paivakodit': 1.2,
     'liikuntapaikat': 0.8,
     'terveysasemat': 1.3,
-    'julkinen_liikenne': 0.5
+    'julkinen_liikenne': 0.5,
+    'ravintolat': 0.7,
+    'kahvilat': 0.5,
+    'puistot': 0.6,
+    'kirjastot': 1.0,
+    'apteekit': 1.1
 }
 
 # Laske uudet palveluindeksit

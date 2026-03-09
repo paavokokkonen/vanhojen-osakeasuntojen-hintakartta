@@ -112,8 +112,15 @@ for feature in geojson_data['features']:
         paavo_aikasarja = rikastettu_data[postcode].get('paavo', {})
         
         # Valitse viimeisin saatavilla oleva vuosi väestötiedoista
+        # Suosi vuotta jolla on myös työpaikkatietoja (tp_tyopy > 0)
         if paavo_aikasarja:
-            viimeisin_vuosi = max(paavo_aikasarja.keys())
+            vuodet_jarj = sorted(paavo_aikasarja.keys(), reverse=True)
+            viimeisin_vuosi = vuodet_jarj[0]
+            # Etsi viimeisin vuosi jolla tp_tyopy > 0 (työpaikkatilasto julkaistu)
+            for v in vuodet_jarj:
+                if paavo_aikasarja[v].get('tp_tyopy', 0) > 0:
+                    viimeisin_vuosi = v
+                    break
             feature['properties']['paavo'] = paavo_aikasarja[viimeisin_vuosi]
             feature['properties']['paavo_aikasarja'] = paavo_aikasarja
         else:
@@ -948,12 +955,14 @@ html = f'''<!DOCTYPE html>
             <div class="finder-group">
                 <label>🏪 Vaaditut palvelut</label>
                 <div class="finder-checks">
-                    <label class="finder-check"><input type="checkbox" id="finder-kaupat"> 🛒 Kaupat</label>
+                    <label class="finder-check"><input type="checkbox" id="finder-kaupat"> 🛒 Ruokakaupat</label>
                     <label class="finder-check"><input type="checkbox" id="finder-koulut"> 🏫 Koulut</label>
                     <label class="finder-check"><input type="checkbox" id="finder-paivakodit"> 🧒 Päiväkodit</label>
                     <label class="finder-check"><input type="checkbox" id="finder-liikunta"> 💪 Liikunta</label>
                     <label class="finder-check"><input type="checkbox" id="finder-terveys"> 🏥 Terveys</label>
                     <label class="finder-check"><input type="checkbox" id="finder-liikenne"> 🚌 Julk.liikenne</label>
+                    <label class="finder-check"><input type="checkbox" id="finder-kirjastot"> 📚 Kirjastot</label>
+                    <label class="finder-check"><input type="checkbox" id="finder-apteekit"> 💊 Apteekit</label>
                 </div>
             </div>
             <div class="finder-group">
@@ -1715,11 +1724,28 @@ html = f'''<!DOCTYPE html>
                     
                     // Koulutus & työpaikat
                     if (paavo.korkeakoulutetut_osuus !== undefined) {{
+                        // Fallback: jos tp_tyopy === 0 (dataa ei julkaistu tälle vuodelle),
+                        // etsi viimeisin vuosi jolla on työpaikkatietoja
+                        var ictOsuus = paavo.tp_ict_osuus || 0;
+                        var palvelutOsuus = paavo.tp_palvelut_osuus || 0;
+                        var tpVuosiLabel = '';
+                        if (paavo.tp_tyopy === 0 && props.paavo_aikasarja) {{
+                            var tpVuodet = Object.keys(props.paavo_aikasarja).map(Number).sort(function(a,b) {{ return b-a; }});
+                            for (var ti = 0; ti < tpVuodet.length; ti++) {{
+                                var tpV = props.paavo_aikasarja[tpVuodet[ti]];
+                                if (tpV && tpV.tp_tyopy > 0) {{
+                                    ictOsuus = tpV.tp_ict_osuus || 0;
+                                    palvelutOsuus = tpV.tp_palvelut_osuus || 0;
+                                    tpVuosiLabel = ' (' + (tpVuodet[ti] - 1) + ')';
+                                    break;
+                                }}
+                            }}
+                        }}
                         html += '<div class="details" style="margin-top: 5px; border-top: 1px solid #eee; padding-top: 3px;">' +
                             '<strong>🎓 Koulutus & työ:</strong><br>' +
                             '🎓 Korkeakoulutetut: ' + paavo.korkeakoulutetut_osuus + ' %<br>' +
-                            '💻 ICT-työpaikat: ' + (paavo.tp_ict_osuus || 0) + ' %<br>' +
-                            '🏭 Palveluala: ' + (paavo.tp_palvelut_osuus || 0) + ' %</div>';
+                            '💻 ICT-työpaikat: ' + ictOsuus + ' %' + tpVuosiLabel + '<br>' +
+                            '🏭 Palveluala: ' + palvelutOsuus + ' %' + tpVuosiLabel + '</div>';
                     }}
                 }}
             }}
@@ -1730,8 +1756,9 @@ html = f'''<!DOCTYPE html>
                 if (p.kaupat !== undefined && p.palveluindeksi > 0) {{
                     html += '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
                         '<strong>🏪 Palvelut (postinumeroalueella):</strong><br>' +
-                        '🛒 Kaupat: ' + p.kaupat + '&nbsp;&nbsp;🏫 Koulut: ' + p.koulut + '&nbsp;&nbsp;🧒 Päiväkodit: ' + p.paivakodit + '<br>' +
+                        '🛒 Ruokakaupat: ' + p.kaupat + '&nbsp;&nbsp;🏫 Koulut: ' + p.koulut + '&nbsp;&nbsp;🧒 Päiväkodit: ' + p.paivakodit + '<br>' +
                         '💪 Liikunta: ' + p.liikuntapaikat + '&nbsp;&nbsp;🏥 Terveys: ' + p.terveysasemat + '&nbsp;&nbsp;🚌 Liikenne: ' + p.julkinen_liikenne + '<br>' +
+                        '📚 Kirjastot: ' + (p.kirjastot || 0) + '&nbsp;&nbsp;💊 Apteekit: ' + (p.apteekit || 0) + '<br>' +
                         '🍽️ Ravintolat: ' + (p.ravintolat || 0) + '&nbsp;&nbsp;☕ Kahvilat: ' + (p.kahvilat || 0) + '&nbsp;&nbsp;🌳 Puistot: ' + (p.puistot || 0) + '<br>' +
                         '⭐ Palveluindeksi: ' + p.palveluindeksi.toFixed(1) + '</div>';
                 }}
@@ -2272,12 +2299,14 @@ html = f'''<!DOCTYPE html>
                                 popupContent = popupContent.replace(/<\\/div>\\s*$/, '') +
                                     '<div class="details" style="margin-top: 10px; border-top: 1px solid #ddd; padding-top: 5px;">' +
                                     '<strong>' + String.fromCodePoint(0x1F3EA) + ' Palvelut (postinumeroalueella):</strong><br>' +
-                                    String.fromCodePoint(0x1F6D2) + ' Kaupat: ' + palvelut.kaupat + '<br>' +
+                                    String.fromCodePoint(0x1F6D2) + ' Ruokakaupat: ' + palvelut.kaupat + '<br>' +
                                     String.fromCodePoint(0x1F3EB) + ' Koulut: ' + palvelut.koulut + '<br>' +
                                     String.fromCodePoint(0x1F9D2) + ' P' + String.fromCharCode(228) + 'iv' + String.fromCharCode(228) + 'kodit: ' + palvelut.paivakodit + '<br>' +
                                     String.fromCodePoint(0x1F4AA) + ' Liikuntapaikat: ' + palvelut.liikuntapaikat + '<br>' +
                                     String.fromCodePoint(0x1F3E5) + ' Terveysasemat: ' + palvelut.terveysasemat + '<br>' +
                                     String.fromCodePoint(0x1F68C) + ' Julk. liikenne: ' + palvelut.julkinen_liikenne + '<br>' +
+                                    String.fromCodePoint(0x1F4DA) + ' Kirjastot: ' + (palvelut.kirjastot || 0) + '<br>' +
+                                    String.fromCodePoint(0x1F48A) + ' Apteekit: ' + (palvelut.apteekit || 0) + '<br>' +
                                     String.fromCodePoint(0x2B50) + ' Palveluindeksi: ' + palvelut.palveluindeksi.toFixed(1) + '</div>';
                             }}
                         }}
@@ -2863,6 +2892,8 @@ html = f'''<!DOCTYPE html>
             document.getElementById('finder-liikunta').checked = false;
             document.getElementById('finder-terveys').checked = false;
             document.getElementById('finder-liikenne').checked = false;
+            document.getElementById('finder-kirjastot').checked = false;
+            document.getElementById('finder-apteekit').checked = false;
             document.getElementById('finder-max-matka').value = 0;
             document.getElementById('finder-matka-val').textContent = 'Ei rajoitusta';
             document.getElementById('finder-results').innerHTML = '';
@@ -2892,6 +2923,8 @@ html = f'''<!DOCTYPE html>
             var reqLiikunta = document.getElementById('finder-liikunta').checked;
             var reqTerveys = document.getElementById('finder-terveys').checked;
             var reqLiikenne = document.getElementById('finder-liikenne').checked;
+            var reqKirjastot = document.getElementById('finder-kirjastot').checked;
+            var reqApteekit = document.getElementById('finder-apteekit').checked;
             
             var year = document.getElementById('year-select').value;
             var results = [];
@@ -2919,6 +2952,8 @@ html = f'''<!DOCTYPE html>
                 if (reqLiikunta && (!palvelut.liikuntapaikat || palvelut.liikuntapaikat < 1)) return;
                 if (reqTerveys && (!palvelut.terveysasemat || palvelut.terveysasemat < 1)) return;
                 if (reqLiikenne && (!palvelut.julkinen_liikenne || palvelut.julkinen_liikenne < 1)) return;
+                if (reqKirjastot && (!palvelut.kirjastot || palvelut.kirjastot < 1)) return;
+                if (reqApteekit && (!palvelut.apteekit || palvelut.apteekit < 1)) return;
                 
                 // Palveluindeksi
                 var pIdx = palvelut.palveluindeksi || 0;
