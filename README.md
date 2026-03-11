@@ -45,6 +45,7 @@ Interaktiivinen kartta Suomen asuntojen keskihinnoista ja kauppamääristä post
   - **Laajennetut Paavo-tiedot:** ikärakenne (lapset/työikäiset/eläkeikäiset %), asuntorakenne (kerrostalo%, keskipinta-ala, omistus/vuokra%), koulutus & työ (korkeakoulutetut%, ICT%, palveluala%)
   - **Matka-aika keskustaan:** lähimmän keskustan nimi, minuutit, kilometrit, kulkutapa
   - **Laajennetut palvelut:** 11 kategoriaa (+ ravintolat, kahvilat, puistot, kirjastot, apteekit)
+  - **Mobiili:** Popup näkyy alapaneelina (bottom sheet) kartan alalaidassa — ei estä kartassa liikkumista. Sulkeutuu pyyhkäisemällä alas, klikkaamalla karttaa tai karttaa liikutettaessa.
 - **Hakutoiminto** postinumeroalueille
 - **Kaupunkinavigointi** (Helsinki, Espoo, Vantaa, Tampere, Turku, Oulu, Kuopio)
 - **Dynaamiset tilastot** valituista parametreista
@@ -464,7 +465,7 @@ Tutkimuskirjallisuuden selitysvoiman ja teknisen toteutettavuuden perusteella su
 
 **Ideat:**
 
-- **✅ Mobiilioptimeinti** (toteutettu 5.3.2026)
+- **✅ Mobiilioptimeinti** (toteutettu 5.3.2026, päivitetty 11.3.2026)
   - *Status:* ✅ Toteutettu
   - *Toteutettu:*
     - Hamburger-valikko (☰) piilottaa kontrollit mobiilissa
@@ -473,6 +474,12 @@ Tutkimuskirjallisuuden selitysvoiman ja teknisen toteutettavuuden perusteella su
     - Kartta lähes koko näytön korkuinen (calc(100vh - 50px))
     - Valikko sulkeutuu automaattisesti karttaa klikatessa
     - Haku-kenttä piilotettu mobiilissa hamburger-painikkeen tieltä
+    - **Mobiili-alapaneeli (bottom sheet)** — popupit näytetään mobiilissa liukuvana alapaneelina Leaflet-popupin sijaan (11.3.2026)
+      - Ei estä kartan panorointia tai zoomaamista
+      - Sulkeutuu: swipe alas (>80px), kartan klikkaus, kartan liikuttaminen
+      - Vetokahva (drag handle) ja sulkemispainike (×)
+      - Leaflet-popup piilotettu CSS:llä mobiilissa varmuuden vuoksi
+      - Desktopilla normaali Leaflet-popup säilyy ennallaan
 
 - **✅ Animaatioiden alasvetovalikko** (toteutettu 4.3.2026)
   - *Status:* ✅ Toteutettu
