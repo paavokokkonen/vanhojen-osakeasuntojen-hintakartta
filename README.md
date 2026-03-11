@@ -243,6 +243,56 @@ Avaa `kartta.html` selaimessa.
 ### Kartat (generoituvat)
 - `kartta.html` - Interaktiivinen polygon-kartta (~20+ MB)
 
+## Kehitysohje: kartan UI-muutokset
+
+> **TÄRKEÄÄ:** `kartta.html` on `.gitignore`-tiedostossa eikä ole repossa — se generoidaan aina `kartta_polygon.py`:llä. **Kaikki kartan CSS-, HTML- ja JavaScript-muutokset tulee tehdä `kartta_polygon.py`-tiedostoon**, jotta ne säilyvät uudelleengeneroinnissa.
+
+### Arkkitehtuuri
+
+`kartta_polygon.py` sisältää koko kartan yhtenä f-string-templaattina (`html = f'''...'''`):
+- **Rivi ~183–778:** CSS (`<style>` ... `</style>`)
+- **Rivi ~779–1048:** HTML-rakenne (header, kontrollit, kartta-div, paneelit)
+- **Rivi ~1049–loppuun:** JavaScript (`<script>` ... `</script>`)
+
+**F-string-syntaksi:** Koska koko HTML on Pythonin f-stringissä, kaikki kaarisulkeet CSS:ssä ja JS:ssä tulee kahdentaa: `{{` ja `}}`. Esim. `if (x) {{ ... }}`, `.class {{ color: red; }}`.
+
+### Mobiili-alapaneeli (bottom sheet) — toteutusperiaate
+
+Mobiilissa Leaflet-popupit estävät kartan käyttöä. Ratkaisu: mobiililla popup korvataan liukuvalla alapaneelilla.
+
+**Komponentit `kartta_polygon.py`:ssä:**
+
+1. **CSS** (ennen `</style>`-tagia):
+   - `#mobile-info-panel` — fixed bottom, slide-up animaatio, max 55vh
+   - `@media (max-width: 768px)` — piilota `.leaflet-popup`
+   - `@media (min-width: 769px)` — piilota `#mobile-info-panel`
+
+2. **HTML** (`<div id="map">`:n jälkeen):
+   - `<div id="mobile-info-panel">` drag handlella, sulje-napilla, content-alueella
+
+3. **JavaScript** (kartan alustuksen jälkeen, ennen mobiilivalikon click-handleria):
+   - `isMobileDevice` — media query -tunnistus + change listener
+   - `openMobilePanel(content)` — näyttää paneelin slide-up-animaatiolla
+   - `closeMobilePanel()` — piilottaa paneelin 300ms transitiolla
+   - Swipe-to-dismiss IIFE — touchstart/move/end, >80px kynnys
+   - `map.on('click')` + `map.on('movestart')` — sulkee paneelin
+   - `bindMobilePopup(layer, popupContent, feature)` — yhdistää popup-logiikan: desktopilla normaali `layer.bindPopup()`, mobiililla `openMobilePanel()`
+
+4. **Popup-sidonta** (4 karttafunktiossa):
+   - `createAbsoluteMap`, `createChangeMap`, `createAnalysisMap`, `createAnimationFrame`
+   - Käytä `bindMobilePopup(layer, popupContent, feature)` suoraan `layer.bindPopup()` + `layer.on('click')` -yhdistelmän sijaan
+   - `layer.on('mouseover/mouseout')` säilyy erikseen (hover-efekti)
+
+5. **openPopup-kutsut** (zoomToArea, zoomToFinderArea):
+   - Tarkista `isMobileDevice`: mobiililla `layer.fire('click')`, desktopilla `layer.openPopup()`
+
+### Muistilista uusille kartta-UI-muutoksille
+
+1. Muokkaa **`kartta_polygon.py`** (ei `kartta.html`)
+2. Käytä `{{` / `}}` kaarisulkeissa (f-string)
+3. Testaa: `python kartta_polygon.py` → avaa `kartta.html` selaimessa
+4. Commitoi `kartta_polygon.py` — `kartta.html` ei mene gittiin
+
 ## Tekninen toteutus
 
 - **Karttakirjasto:** Leaflet 1.9.4
@@ -467,6 +517,7 @@ Tutkimuskirjallisuuden selitysvoiman ja teknisen toteutettavuuden perusteella su
 
 - **✅ Mobiilioptimeinti** (toteutettu 5.3.2026, päivitetty 11.3.2026)
   - *Status:* ✅ Toteutettu
+  - *Lähdekoodi:* `kartta_polygon.py` (ei kartta.html — se on generoitu ja .gitignored)
   - *Toteutettu:*
     - Hamburger-valikko (☰) piilottaa kontrollit mobiilissa
     - Stats-palkki kelluvana overlay:na kartan päällä

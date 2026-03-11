@@ -775,6 +775,69 @@ html = f'''<!DOCTYPE html>
         }}
         .finder-result-value .fr-price {{ font-weight: bold; color: #1e3c72; }}
         .finder-result-value .fr-services {{ font-size: 10px; color: #888; }}
+
+        /* Mobiili-alapaneeli popupin sijaan */
+        #mobile-info-panel {{
+            display: none;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 1500;
+            background: white;
+            border-radius: 16px 16px 0 0;
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.25);
+            max-height: 55vh;
+            overflow-y: auto;
+            padding: 0 16px 16px 16px;
+            transition: transform 0.3s ease-out;
+            transform: translateY(100%);
+            -webkit-overflow-scrolling: touch;
+        }}
+        #mobile-info-panel.visible {{
+            display: block;
+            transform: translateY(0);
+        }}
+        #mobile-info-panel .mobile-panel-handle {{
+            display: flex;
+            justify-content: center;
+            padding: 10px 0 6px 0;
+            cursor: grab;
+            position: sticky;
+            top: 0;
+            background: white;
+            z-index: 1;
+        }}
+        #mobile-info-panel .mobile-panel-handle::after {{
+            content: '';
+            width: 40px;
+            height: 4px;
+            background: #ccc;
+            border-radius: 2px;
+        }}
+        #mobile-info-panel .mobile-panel-close {{
+            position: sticky;
+            top: 0;
+            float: right;
+            font-size: 28px;
+            cursor: pointer;
+            color: #666;
+            z-index: 2;
+            background: white;
+            border: none;
+            padding: 0 5px;
+            line-height: 1;
+            margin-top: -30px;
+        }}
+        #mobile-info-panel .popup-content {{
+            min-width: unset;
+        }}
+        @media (max-width: 768px) {{
+            .leaflet-popup {{ display: none !important; }}
+        }}
+        @media (min-width: 769px) {{
+            #mobile-info-panel {{ display: none !important; }}
+        }}
     </style>
 </head>
 <body>
@@ -917,6 +980,13 @@ html = f'''<!DOCTYPE html>
     <button id="top10-toggle" onclick="toggleTop10Panel()">🏆 Top 10</button>
     <button id="finder-toggle" onclick="toggleFinderPanel()">🔍 Paras alue</button>
     <div id="map"></div>
+
+    <!-- Mobiili-infopaneeli (popup-korvike) -->
+    <div id="mobile-info-panel">
+        <div class="mobile-panel-handle"></div>
+        <button class="mobile-panel-close" onclick="closeMobilePanel()">&times;</button>
+        <div id="mobile-info-content"></div>
+    </div>
     
     <!-- Paras alue -hakupaneeli -->
     <div id="finder-panel">
@@ -1053,7 +1123,95 @@ html = f'''<!DOCTYPE html>
         L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
             attribution: '© OpenStreetMap contributors'
         }}).addTo(map);
-        
+
+        // Mobiilitunnistus
+        var isMobileDevice = window.matchMedia('(max-width: 768px)').matches;
+        window.matchMedia('(max-width: 768px)').addEventListener('change', function(e) {{
+            isMobileDevice = e.matches;
+            if (!isMobileDevice) closeMobilePanel();
+        }});
+
+        // Mobiili-infopaneelin hallinta
+        function openMobilePanel(content) {{
+            var panel = document.getElementById('mobile-info-panel');
+            var contentEl = document.getElementById('mobile-info-content');
+            contentEl.innerHTML = content;
+            panel.style.display = 'block';
+            panel.offsetHeight;
+            panel.classList.add('visible');
+        }}
+
+        function closeMobilePanel() {{
+            var panel = document.getElementById('mobile-info-panel');
+            panel.classList.remove('visible');
+            setTimeout(function() {{
+                if (!panel.classList.contains('visible')) {{
+                    panel.style.display = 'none';
+                }}
+            }}, 300);
+        }}
+
+        // Swipe-alas sulkee mobiilipaneelin
+        (function() {{
+            var panel = document.getElementById('mobile-info-panel');
+            var startY = 0, currentY = 0, isDragging = false;
+
+            panel.addEventListener('touchstart', function(e) {{
+                if (panel.scrollTop <= 0) {{
+                    startY = e.touches[0].clientY;
+                    isDragging = true;
+                }}
+            }}, {{ passive: true }});
+
+            panel.addEventListener('touchmove', function(e) {{
+                if (!isDragging) return;
+                currentY = e.touches[0].clientY;
+                var diff = currentY - startY;
+                if (diff > 0) {{
+                    panel.style.transform = 'translateY(' + diff + 'px)';
+                    panel.style.transition = 'none';
+                }}
+            }}, {{ passive: true }});
+
+            panel.addEventListener('touchend', function() {{
+                if (!isDragging) return;
+                isDragging = false;
+                panel.style.transition = 'transform 0.3s ease-out';
+                var diff = currentY - startY;
+                if (diff > 80) {{
+                    closeMobilePanel();
+                }} else {{
+                    panel.style.transform = 'translateY(0)';
+                }}
+                startY = 0;
+                currentY = 0;
+            }});
+        }})();
+
+        // Sulje mobiilipaneeli kun karttaa klikataan tai liikutetaan
+        map.on('click', function(e) {{
+            if (isMobileDevice && !e.originalEvent._fromLayer) {{
+                closeMobilePanel();
+            }}
+        }});
+        map.on('movestart', function() {{
+            if (isMobileDevice) closeMobilePanel();
+        }});
+
+        // Bind popup: mobiilissa käyttää alapaneelia, desktopilla normaali popup
+        function bindMobilePopup(layer, popupContent, feature) {{
+            if (!isMobileDevice) {{
+                layer.bindPopup(popupContent, {{ maxWidth: 300 }});
+            }}
+            layer.on('click', function(e) {{
+                selectedFeature = feature;
+                if (isMobileDevice) {{
+                    if (e.originalEvent) e.originalEvent._fromLayer = true;
+                    openMobilePanel(popupContent);
+                }}
+            }});
+        }}
+
         // Sulje mobiilivalikko kun karttaa klikataan
         map.on('click', function() {{
             var controls = document.getElementById('controls');
@@ -2051,9 +2209,7 @@ html = f'''<!DOCTYPE html>
                     }} // close isRatio/isYield/else
                     // Lisää aikasarjanappi popupiin
                     popupContent = popupContent.replace(/<\\/div>$/, '<button class="ts-btn" onclick="openTimeSeriesModal()">📊 Näytä aikasarja</button></div>');
-                    layer.bindPopup(popupContent, {{ maxWidth: 300 }});
-                    
-                    layer.on('click', function() {{ selectedFeature = feature; }});
+                    bindMobilePopup(layer, popupContent, feature);
                     layer.on('mouseover', function(e) {{
                         this.setStyle({{ fillOpacity: 0.9, weight: 2 }});
                     }});
@@ -2128,9 +2284,7 @@ html = f'''<!DOCTYPE html>
                             '</div>';
                     }}
                     popupContent = popupContent.replace(/<\\/div>$/, '<button class="ts-btn" onclick="openTimeSeriesModal()">📊 Näytä aikasarja</button></div>');
-                    layer.bindPopup(popupContent, {{ maxWidth: 300 }});
-                    
-                    layer.on('click', function() {{ selectedFeature = feature; }});
+                    bindMobilePopup(layer, popupContent, feature);
                     layer.on('mouseover', function(e) {{
                         this.setStyle({{ fillOpacity: 0.9, weight: 2 }});
                     }});
@@ -2315,9 +2469,7 @@ html = f'''<!DOCTYPE html>
                     }}
                     
                     popupContent = popupContent.replace(/<\\/div>$/, '<button class="ts-btn" onclick="openTimeSeriesModal()">' + String.fromCodePoint(0x1F4CA) + ' N' + String.fromCharCode(228) + 'yt' + String.fromCharCode(228) + ' aikasarja</button></div>');
-                    layer.bindPopup(popupContent, {{ maxWidth: 300 }});
-                    
-                    layer.on('click', function() {{ selectedFeature = feature; }});
+                    bindMobilePopup(layer, popupContent, feature);
                     layer.on('mouseover', function(e) {{
                         this.setStyle({{ fillOpacity: 0.9, weight: 2 }});
                     }});
@@ -2359,10 +2511,8 @@ html = f'''<!DOCTYPE html>
                             '<div class="details">' + year + (year == 2026 ? '*' : '') + ' | ' + buildingTypes[buildingType] + '</div>' +
                             '<button class="ts-btn" onclick="openTimeSeriesModal()">📊 Näytä aikasarja</button>' +
                             '</div>';
-                        layer.bindPopup(popupContent, {{ maxWidth: 300 }});
+                        bindMobilePopup(layer, popupContent, feature);
                     }}
-                    
-                    layer.on('click', function() {{ selectedFeature = feature; }});
                     layer.on('mouseover', function(e) {{
                         this.setStyle({{ fillOpacity: 0.9, weight: 2 }});
                     }});
@@ -2854,7 +3004,11 @@ html = f'''<!DOCTYPE html>
             geoJsonLayer.eachLayer(function(layer) {{
                 if (layer.feature.properties.postinumer === postcode) {{
                     map.fitBounds(layer.getBounds(), {{ maxZoom: 14 }});
-                    layer.openPopup();
+                    if (isMobileDevice) {{
+                        layer.fire('click');
+                    }} else {{
+                        layer.openPopup();
+                    }}
                     selectedFeature = layer.feature;
                 }}
             }});
@@ -3043,7 +3197,11 @@ html = f'''<!DOCTYPE html>
             geoJsonLayer.eachLayer(function(layer) {{
                 if (layer.feature.properties.postinumer === postcode) {{
                     map.fitBounds(layer.getBounds(), {{ maxZoom: 14 }});
-                    layer.openPopup();
+                    if (isMobileDevice) {{
+                        layer.fire('click');
+                    }} else {{
+                        layer.openPopup();
+                    }}
                     selectedFeature = layer.feature;
                 }}
             }});
